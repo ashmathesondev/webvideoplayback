@@ -26,6 +26,14 @@ Launch the executable. The app opens a native file picker.
 
 Press `F1` to toggle the debug overlay.
 Performance CSV files are written to `reports/`.
+Set `WEBVIDEOPLAYBACK_AUDIO_LATENCY_MS` to tune queued audio.
+The default target is `150`.
+
+Release build output:
+
+```powershell
+.\build\windows-msvc-vcpkg\Release\webvideoplayback.exe
+```
 
 The first implementation targets local files. Network URLs, seeking,
 subtitles, playlists, and hardware decoding are natural next steps.
