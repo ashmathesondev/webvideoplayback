@@ -1,0 +1,20 @@
+{
+  "name": "webvideoplayback",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "sdl2",
+    {
+      "name": "ffmpeg",
+      "default-features": true,
+      "features": [
+        "dav1d",
+        "opus",
+        "vorbis",
+        "vpx",
+        "zlib",
+        "bzip2",
+        "lzma"
+      ]
+    }
+  ]
+}
