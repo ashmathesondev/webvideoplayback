@@ -24,7 +24,8 @@ cmake --build --preset windows-msvc-vcpkg-debug
 
 Launch the executable. The app opens a native file picker.
 
-Playback shows a debug overlay at the bottom of the window.
+Press `F1` to toggle the debug overlay.
+Performance CSV files are written to `reports/`.
 
 The first implementation targets local files. Network URLs, seeking,
 subtitles, playlists, and hardware decoding are natural next steps.

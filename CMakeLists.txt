@@ -21,6 +21,10 @@ target_link_directories(webvideoplayback PRIVATE
     ${FFMPEG_LIBRARY_DIRS}
 )
 
+target_compile_definitions(webvideoplayback PRIVATE
+    WEBVIDEOPLAYBACK_REPORT_DIR="${CMAKE_SOURCE_DIR}/reports"
+)
+
 target_link_libraries(webvideoplayback PRIVATE
     $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
     $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>

@@ -22,11 +22,18 @@ extern "C" {
 }
 
 #include <chrono>
+#include <atomic>
+#include <condition_variable>
+#include <ctime>
 #include <cstdint>
 #include <array>
+#include <deque>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -194,6 +201,16 @@ struct StreamDecoder {
 
 struct DebugStats {
     double render_frame_ms = 0.0;
+    double demux_ms = 0.0;
+    double send_packet_ms = 0.0;
+    double decode_ms = 0.0;
+    double convert_ms = 0.0;
+    double upload_ms = 0.0;
+    double present_ms = 0.0;
+    double clear_ms = 0.0;
+    double copy_ms = 0.0;
+    double overlay_ms = 0.0;
+    double swap_ms = 0.0;
     Uint32 audio_queued_bytes = 0;
     double audio_queued_ms = 0.0;
     int audio_sample_rate = 0;
@@ -210,14 +227,139 @@ struct DebugStats {
     double peak_working_set_mb = 0.0;
 };
 
+struct VideoFrameTiming {
+    double demux_ms = 0.0;
+    double send_packet_ms = 0.0;
+    double decode_ms = 0.0;
+    double convert_ms = 0.0;
+    double upload_ms = 0.0;
+    double present_ms = 0.0;
+    double clear_ms = 0.0;
+    double copy_ms = 0.0;
+    double overlay_ms = 0.0;
+    double swap_ms = 0.0;
+    double total_ms = 0.0;
+};
+
+struct VideoStreamInfo {
+    std::string codec_name;
+    std::string pixel_format;
+    double fps = 0.0;
+    int bit_rate = 0;
+};
+
 struct MemoryStats {
     double working_set_mb = 0.0;
     double private_usage_mb = 0.0;
     double peak_working_set_mb = 0.0;
 };
 
+struct PerformanceSample {
+    std::uint64_t frame_number = 0;
+    double media_time_s = 0.0;
+    VideoFrameTiming timing;
+    MemoryStats memory;
+    Uint32 audio_queued_bytes = 0;
+    double audio_queued_ms = 0.0;
+    int window_width = 0;
+    int window_height = 0;
+    int display_width = 0;
+    int display_height = 0;
+};
+
+struct PacketTiming {
+    double demux_ms = 0.0;
+};
+
+class PerformanceReport {
+public:
+    PerformanceReport(const std::string& media_path, const VideoStreamInfo& video_info)
+    {
+        const std::filesystem::path report_directory = WEBVIDEOPLAYBACK_REPORT_DIR;
+        std::filesystem::create_directories(report_directory);
+        const auto report_path = report_directory / ("webvideoplayback-performance-" + timestamp() + ".csv");
+        file_.open(report_path, std::ios::out | std::ios::trunc);
+        if (!file_) {
+            return;
+        }
+
+        file_ << "media_path," << csv_escape(media_path) << "\n";
+        file_ << "video_codec," << csv_escape(video_info.codec_name) << "\n";
+        file_ << "pixel_format," << csv_escape(video_info.pixel_format) << "\n";
+        file_ << "fps," << video_info.fps << "\n";
+        file_ << "bit_rate," << video_info.bit_rate << "\n";
+        file_ << "frame,media_time_s,total_ms,demux_ms,send_packet_ms,decode_ms,convert_ms,upload_ms,present_ms,"
+              << "clear_ms,copy_ms,overlay_ms,swap_ms,"
+              << "working_set_mb,private_mb,peak_working_set_mb,audio_queued_bytes,"
+              << "audio_queued_ms,window_width,window_height,display_width,display_height\n";
+    }
+
+    void write(const PerformanceSample& sample)
+    {
+        if (!file_) {
+            return;
+        }
+
+        file_ << sample.frame_number << ','
+              << sample.media_time_s << ','
+              << sample.timing.total_ms << ','
+              << sample.timing.demux_ms << ','
+              << sample.timing.send_packet_ms << ','
+              << sample.timing.decode_ms << ','
+              << sample.timing.convert_ms << ','
+              << sample.timing.upload_ms << ','
+              << sample.timing.present_ms << ','
+              << sample.timing.clear_ms << ','
+              << sample.timing.copy_ms << ','
+              << sample.timing.overlay_ms << ','
+              << sample.timing.swap_ms << ','
+              << sample.memory.working_set_mb << ','
+              << sample.memory.private_usage_mb << ','
+              << sample.memory.peak_working_set_mb << ','
+              << sample.audio_queued_bytes << ','
+              << sample.audio_queued_ms << ','
+              << sample.window_width << ','
+              << sample.window_height << ','
+              << sample.display_width << ','
+              << sample.display_height << '\n';
+    }
+
+private:
+    static std::string timestamp()
+    {
+        const std::time_t now = std::time(nullptr);
+        std::tm local_time = {};
+#ifdef _WIN32
+        localtime_s(&local_time, &now);
+#else
+        localtime_r(&now, &local_time);
+#endif
+
+        std::ostringstream stream;
+        stream << std::put_time(&local_time, "%Y%m%d-%H%M%S");
+        return stream.str();
+    }
+
+    static std::string csv_escape(const std::string& value)
+    {
+        std::string escaped = "\"";
+        for (char character : value) {
+            if (character == '"') {
+                escaped += "\"\"";
+            } else {
+                escaped += character;
+            }
+        }
+        escaped += '"';
+        return escaped;
+    }
+
+    std::ofstream file_;
+};
+
 struct EventState {
     bool window_interaction = false;
+    bool overlay_toggle = false;
 };
 
 FormatPtr open_input(const std::string& path)
@@ -227,6 +369,28 @@ FormatPtr open_input(const std::string& path)
     FormatPtr format(raw);
     throw_if_error(avformat_find_stream_info(format.get(), nullptr), "read stream info");
     return format;
+}
+
+double stream_fps(const AVStream& stream)
+{
+    const AVRational rate = stream.avg_frame_rate.num != 0 ? stream.avg_frame_rate : stream.r_frame_rate;
+    if (rate.num == 0 || rate.den == 0) {
+        return 0.0;
+    }
+
+    return av_q2d(rate);
+}
+
+VideoStreamInfo video_stream_info(const AVStream& stream, const AVCodecContext& codec)
+{
+    VideoStreamInfo info;
+    const AVCodecDescriptor* descriptor = avcodec_descriptor_get(codec.codec_id);
+    info.codec_name = descriptor != nullptr ? descriptor->name : "unknown";
+    const char* pixel_format = av_get_pix_fmt_name(codec.pix_fmt);
+    info.pixel_format = pixel_format != nullptr ? pixel_format : "unknown";
+    info.fps = stream_fps(stream);
+    info.bit_rate = static_cast<int>(codec.bit_rate);
+    return info;
 }
 
 StreamDecoder open_decoder(AVFormatContext& format, AVMediaType type)
@@ -249,6 +413,8 @@ StreamDecoder open_decoder(AVFormatContext& format, AVMediaType type)
 
     CodecContextPtr context(raw_context);
     throw_if_error(avcodec_parameters_to_context(context.get(), stream->codecpar), "copy codec parameters");
+    context->thread_count = 4;
+    context->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
     throw_if_error(avcodec_open2(context.get(), decoder, nullptr), "open decoder");
 
     return {stream_index, std::move(context)};
@@ -274,6 +440,9 @@ EventState pump_events(bool& running)
         }
         if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
             running = false;
+        }
+        if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_F1) {
+            state.overlay_toggle = true;
         }
         if (event.type == SDL_WINDOWEVENT) {
             switch (event.window.event) {
@@ -422,6 +591,13 @@ public:
         SDL_PauseAudioDevice(device_, 0);
     }
 
+    void wait_until_below(double queued_ms, const std::atomic_bool& stop_requested)
+    {
+        while (!stop_requested.load() && queued_milliseconds() > queued_ms) {
+            std::this_thread::sleep_until(std::chrono::steady_clock::now() + std::chrono::milliseconds(5));
+        }
+    }
+
 private:
     static constexpr int output_sample_rate_ = 48000;
     static constexpr int output_channels_ = 2;
@@ -454,7 +630,7 @@ public:
 
         texture_.reset(SDL_CreateTexture(
             renderer_.get(),
-            SDL_PIXELFORMAT_RGBA32,
+            codec.pix_fmt == AV_PIX_FMT_YUV420P ? SDL_PIXELFORMAT_IYUV : SDL_PIXELFORMAT_RGBA32,
             SDL_TEXTUREACCESS_STREAMING,
             codec.width,
             codec.height));
@@ -462,44 +638,76 @@ public:
             throw std::runtime_error(std::string("SDL_CreateTexture failed: ") + SDL_GetError());
         }
 
-        scaler_.reset(sws_getContext(
-            codec.width,
-            codec.height,
-            codec.pix_fmt,
-            codec.width,
-            codec.height,
-            AV_PIX_FMT_RGBA,
-            SWS_BILINEAR,
-            nullptr,
-            nullptr,
-            nullptr));
-        if (!scaler_) {
-            throw std::runtime_error("failed to create video scaler");
+        direct_yuv_ = codec.pix_fmt == AV_PIX_FMT_YUV420P;
+        if (!direct_yuv_) {
+            scaler_.reset(sws_getContext(
+                codec.width,
+                codec.height,
+                codec.pix_fmt,
+                codec.width,
+                codec.height,
+                AV_PIX_FMT_RGBA,
+                SWS_BILINEAR,
+                nullptr,
+                nullptr,
+                nullptr));
+            if (!scaler_) {
+                throw std::runtime_error("failed to create video scaler");
+            }
         }
 
         width_ = codec.width;
         height_ = codec.height;
-        pixels_.resize(static_cast<std::size_t>(width_ * height_ * 4));
+        if (!direct_yuv_) {
+            pixels_.resize(static_cast<std::size_t>(width_ * height_ * 4));
+        }
     }
 
-    void render(const AVFrame& frame, const AudioOutput* audio)
+    VideoFrameTiming render(
+        const AVFrame& frame,
+        const AudioOutput* audio,
+        double demux_ms,
+        double send_packet_ms,
+        double decode_ms,
+        bool show_overlay)
     {
-        const auto render_start = std::chrono::steady_clock::now();
-        std::uint8_t* scaled_pixels[] = {pixels_.data()};
-        const int linesize[] = {width_ * 4};
+        const auto total_start = std::chrono::steady_clock::now();
 
-        sws_scale(
-            scaler_.get(),
-            frame.data,
-            frame.linesize,
-            0,
-            height_,
-            scaled_pixels,
-            linesize);
-
-        if (SDL_UpdateTexture(texture_.get(), nullptr, pixels_.data(), width_ * 4) != 0) {
-            throw std::runtime_error(std::string("SDL_UpdateTexture failed: ") + SDL_GetError());
+        const auto convert_start = std::chrono::steady_clock::now();
+        if (!direct_yuv_) {
+            std::uint8_t* scaled_pixels[] = {pixels_.data()};
+            const int linesize[] = {width_ * 4};
+            sws_scale(
+                scaler_.get(),
+                frame.data,
+                frame.linesize,
+                0,
+                height_,
+                scaled_pixels,
+                linesize);
         }
+        const auto convert_end = std::chrono::steady_clock::now();
+
+        const auto upload_start = std::chrono::steady_clock::now();
+        if (direct_yuv_) {
+            if (SDL_UpdateYUVTexture(
+                    texture_.get(),
+                    nullptr,
+                    frame.data[0],
+                    frame.linesize[0],
+                    frame.data[1],
+                    frame.linesize[1],
+                    frame.data[2],
+                    frame.linesize[2])
+                != 0) {
+                throw std::runtime_error(std::string("SDL_UpdateYUVTexture failed: ") + SDL_GetError());
+            }
+        } else {
+            if (SDL_UpdateTexture(texture_.get(), nullptr, pixels_.data(), width_ * 4) != 0) {
+                throw std::runtime_error(std::string("SDL_UpdateTexture failed: ") + SDL_GetError());
+            }
+        }
+        const auto upload_end = std::chrono::steady_clock::now();
 
         int window_width = 0;
         int window_height = 0;
@@ -507,13 +715,60 @@ public:
         const SDL_Rect video_rect = video_destination_rect(window_width, window_height);
 
         SDL_SetRenderDrawColor(renderer_.get(), 0, 0, 0, 255);
+        const auto present_start = std::chrono::steady_clock::now();
+        const auto clear_start = std::chrono::steady_clock::now();
         SDL_RenderClear(renderer_.get());
+        const auto clear_end = std::chrono::steady_clock::now();
+        const auto copy_start = std::chrono::steady_clock::now();
         SDL_RenderCopy(renderer_.get(), texture_.get(), nullptr, &video_rect);
-        draw_debug_overlay(make_debug_stats(audio, window_width, window_height, video_rect));
+        const auto copy_end = std::chrono::steady_clock::now();
+        const auto overlay_start = std::chrono::steady_clock::now();
+        if (show_overlay) {
+            draw_debug_overlay(make_debug_stats(audio, window_width, window_height, video_rect));
+        }
+        const auto overlay_end = std::chrono::steady_clock::now();
+        const auto swap_start = std::chrono::steady_clock::now();
         SDL_RenderPresent(renderer_.get());
+        const auto swap_end = std::chrono::steady_clock::now();
+        const auto present_end = std::chrono::steady_clock::now();
 
-        const auto render_end = std::chrono::steady_clock::now();
-        last_render_ms_ = std::chrono::duration<double, std::milli>(render_end - render_start).count();
+        const auto total_end = std::chrono::steady_clock::now();
+        last_timing_.demux_ms = demux_ms;
+        last_timing_.send_packet_ms = send_packet_ms;
+        last_timing_.decode_ms = decode_ms;
+        last_timing_.convert_ms = std::chrono::duration<double, std::milli>(convert_end - convert_start).count();
+        last_timing_.upload_ms = std::chrono::duration<double, std::milli>(upload_end - upload_start).count();
+        last_timing_.present_ms = std::chrono::duration<double, std::milli>(present_end - present_start).count();
+        last_timing_.clear_ms = std::chrono::duration<double, std::milli>(clear_end - clear_start).count();
+        last_timing_.copy_ms = std::chrono::duration<double, std::milli>(copy_end - copy_start).count();
+        last_timing_.overlay_ms = std::chrono::duration<double, std::milli>(overlay_end - overlay_start).count();
+        last_timing_.swap_ms = std::chrono::duration<double, std::milli>(swap_end - swap_start).count();
+        last_timing_.total_ms = std::chrono::duration<double, std::milli>(total_end - total_start).count();
+        return last_timing_;
+    }
+
+    int window_width() const
+    {
+        int width = 0;
+        int height = 0;
+        SDL_GetRendererOutputSize(renderer_.get(), &width, &height);
+        return width;
+    }
+
+    int window_height() const
+    {
+        int width = 0;
+        int height = 0;
+        SDL_GetRendererOutputSize(renderer_.get(), &width, &height);
+        return height;
+    }
+
+    SDL_Rect current_video_rect() const
+    {
+        int width = 0;
+        int height = 0;
+        SDL_GetRendererOutputSize(renderer_.get(), &width, &height);
+        return video_destination_rect(width, height);
     }
 
 private:
@@ -543,7 +798,17 @@ private:
         SDL_Rect destination) const
     {
         DebugStats stats;
-        stats.render_frame_ms = last_render_ms_;
+        stats.render_frame_ms = last_timing_.total_ms;
+        stats.demux_ms = last_timing_.demux_ms;
+        stats.send_packet_ms = last_timing_.send_packet_ms;
+        stats.decode_ms = last_timing_.decode_ms;
+        stats.convert_ms = last_timing_.convert_ms;
+        stats.upload_ms = last_timing_.upload_ms;
+        stats.present_ms = last_timing_.present_ms;
+        stats.clear_ms = last_timing_.clear_ms;
+        stats.copy_ms = last_timing_.copy_ms;
+        stats.overlay_ms = last_timing_.overlay_ms;
+        stats.swap_ms = last_timing_.swap_ms;
         stats.video_width = width_;
         stats.video_height = height_;
         stats.window_width = window_width;
@@ -571,6 +836,7 @@ private:
     {
         switch (character) {
         case '0': return {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E};
+
         case '1': return {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E};
         case '2': return {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F};
         case '3': return {0x1E, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x1E};
@@ -646,26 +912,39 @@ private:
     {
         std::ostringstream first_line;
         first_line << std::fixed << std::setprecision(2)
-                   << "FRAME " << stats.render_frame_ms << " MS"
+                   << "TOTAL " << stats.render_frame_ms << " MS"
+                   << " | DEMUX " << stats.demux_ms
+                   << " | SEND " << stats.send_packet_ms
+                   << " | DEC " << stats.decode_ms << " MS"
+                   << " | CONV " << stats.convert_ms << " MS"
+                   << " | UP " << stats.upload_ms << " MS";
+
+        std::ostringstream second_line;
+        second_line << std::fixed << std::setprecision(2)
+                   << "PRESENT " << stats.present_ms << " MS"
+                   << " | CLR " << stats.clear_ms
+                   << " CPY " << stats.copy_ms
+                   << " OVR " << stats.overlay_ms
+                   << " SWP " << stats.swap_ms
                    << " | AUDIO " << stats.audio_queued_ms << " MS "
                    << stats.audio_queued_bytes << " B "
                    << stats.audio_sample_rate << " HZ "
                    << stats.audio_channels << " CH";
 
-        std::ostringstream second_line;
-        second_line << std::fixed << std::setprecision(2)
+        std::ostringstream third_line;
+        third_line << std::fixed << std::setprecision(2)
                     << "SCALE " << stats.scale
                     << " | SOURCE " << stats.video_width << "X" << stats.video_height
                     << " -> DISPLAY " << stats.display_width << "X" << stats.display_height
                     << " | WINDOW " << stats.window_width << "X" << stats.window_height;
 
-        std::ostringstream third_line;
-        third_line << std::fixed << std::setprecision(1)
+        std::ostringstream fourth_line;
+        fourth_line << std::fixed << std::setprecision(1)
                    << "MEM WS " << stats.working_set_mb << " MB"
                    << " | PRIVATE " << stats.private_usage_mb << " MB"
                    << " | PEAK WS " << stats.peak_working_set_mb << " MB";
 
-        constexpr int panel_height = 80;
+        constexpr int panel_height = 102;
         const int panel_y = stats.window_height > panel_height ? stats.window_height - panel_height : 0;
         SDL_Rect panel = {0, panel_y, stats.window_width, panel_height};
 
@@ -678,6 +957,7 @@ private:
         draw_text(12, panel_y + 10, first_line.str());
         draw_text(12, panel_y + 32, second_line.str());
         draw_text(12, panel_y + 54, third_line.str());
+        draw_text(12, panel_y + 76, fourth_line.str());
         SDL_SetRenderDrawBlendMode(renderer_.get(), SDL_BLENDMODE_NONE);
     }
 
@@ -687,7 +967,8 @@ private:
     SwsPtr scaler_;
     int width_ = 0;
     int height_ = 0;
-    double last_render_ms_ = 0.0;
+    bool direct_yuv_ = false;
+    VideoFrameTiming last_timing_;
     std::vector<std::uint8_t> pixels_;
 };
 
@@ -711,17 +992,113 @@ void decode_audio_packet(AVCodecContext& codec, const AVPacket& packet, AudioOut
     }
 }
 
+class AudioDecoderWorker {
+public:
+    explicit AudioDecoderWorker(CodecContextPtr codec)
+        : codec_(std::move(codec)), output_(*codec_)
+    {
+        worker_ = std::thread([this] { run(); });
+    }
+
+    ~AudioDecoderWorker()
+    {
+        {
+            std::lock_guard lock(mutex_);
+            stop_requested_.store(true);
+        }
+        queue_changed_.notify_all();
+        queue_space_.notify_all();
+        if (worker_.joinable()) {
+            worker_.join();
+        }
+    }
+
+    void push(const AVPacket& packet)
+    {
+        AVPacket* cloned = av_packet_clone(&packet);
+        if (cloned == nullptr) {
+            throw std::runtime_error("failed to clone audio packet");
+        }
+
+        PacketPtr packet_copy(cloned);
+        std::unique_lock lock(mutex_);
+        queue_space_.wait(lock, [this] {
+            return stop_requested_.load() || packet_queue_.size() < max_packets_;
+        });
+        if (stop_requested_.load()) {
+            return;
+        }
+
+        packet_queue_.push_back(std::move(packet_copy));
+        lock.unlock();
+        queue_changed_.notify_one();
+    }
+
+    AudioOutput& output()
+    {
+        return output_;
+    }
+
+    const AudioOutput& output() const
+    {
+        return output_;
+    }
+
+private:
+    void run()
+    {
+        while (true) {
+            PacketPtr packet;
+            {
+                std::unique_lock lock(mutex_);
+                queue_changed_.wait(lock, [this] {
+                    return stop_requested_.load() || !packet_queue_.empty();
+                });
+
+                if (stop_requested_.load() && packet_queue_.empty()) {
+                    break;
+                }
+
+                packet = std::move(packet_queue_.front());
+                packet_queue_.pop_front();
+                queue_space_.notify_one();
+            }
+
+            decode_audio_packet(*codec_, *packet, output_);
+            output_.wait_until_below(250.0, stop_requested_);
+        }
+    }
+
+    static constexpr std::size_t max_packets_ = 256;
+
+    CodecContextPtr codec_;
+    AudioOutput output_;
+    std::deque<PacketPtr> packet_queue_;
+    std::mutex mutex_;
+    std::condition_variable queue_changed_;
+    std::condition_variable queue_space_;
+    std::atomic_bool stop_requested_ = false;
+    std::thread worker_;
+};
+
 void decode_video_packet(
     AVFormatContext& format,
     AVCodecContext& codec,
     int stream_index,
     const AVPacket& packet,
+    PacketTiming packet_timing,
     VideoOutput& output,
     AudioOutput* audio,
+    PerformanceReport& report,
+    std::uint64_t& frame_number,
+    bool& show_overlay,
     std::chrono::steady_clock::time_point& playback_start,
     bool& running)
 {
+    const auto send_start = std::chrono::steady_clock::now();
     throw_if_error(avcodec_send_packet(&codec, &packet), "send video packet");
+    const auto send_end = std::chrono::steady_clock::now();
+    const double send_packet_ms = std::chrono::duration<double, std::milli>(send_end - send_start).count();
 
     FramePtr frame(av_frame_alloc());
     if (!frame) {
@@ -729,7 +1106,10 @@ void decode_video_packet(
     }
 
     while (true) {
+        const auto decode_start = std::chrono::steady_clock::now();
         const int result = avcodec_receive_frame(&codec, frame.get());
+        const auto decode_end = std::chrono::steady_clock::now();
+        const double decode_ms = std::chrono::duration<double, std::milli>(decode_end - decode_start).count();
         if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
             break;
         }
@@ -741,6 +1121,9 @@ void decode_video_packet(
         while (running && std::chrono::steady_clock::now() < target_time) {
             const auto sleep_target = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
             const EventState events = pump_events(running);
+            if (events.overlay_toggle) {
+                show_overlay = !show_overlay;
+            }
             if (events.window_interaction) {
                 const auto pause_start = std::chrono::steady_clock::now();
                 const auto pause_until = pause_start + std::chrono::milliseconds(120);
@@ -761,7 +1144,23 @@ void decode_video_packet(
             break;
         }
 
-        output.render(*frame, audio);
+        const VideoFrameTiming timing =
+            output.render(*frame, audio, packet_timing.demux_ms, send_packet_ms, decode_ms, show_overlay);
+        const SDL_Rect video_rect = output.current_video_rect();
+
+        PerformanceSample sample;
+        sample.frame_number = ++frame_number;
+        sample.media_time_s = target_seconds;
+        sample.timing = timing;
+        sample.memory = current_memory_stats();
+        sample.audio_queued_bytes = audio != nullptr ? audio->queued_size() : 0;
+        sample.audio_queued_ms = audio != nullptr ? audio->queued_milliseconds() : 0.0;
+        sample.window_width = output.window_width();
+        sample.window_height = output.window_height();
+        sample.display_width = video_rect.w;
+        sample.display_height = video_rect.h;
+        report.write(sample);
+
         av_frame_unref(frame.get());
     }
 }
@@ -778,13 +1177,15 @@ int run(const std::string& path)
     }
 
     std::unique_ptr<VideoOutput> video_output;
+    VideoStreamInfo video_info;
     if (video.codec) {
+        video_info = video_stream_info(*format->streams[video.stream_index], *video.codec);
         video_output = std::make_unique<VideoOutput>(*video.codec);
     }
 
-    std::unique_ptr<AudioOutput> audio_output;
+    std::unique_ptr<AudioDecoderWorker> audio_worker;
     if (audio.codec) {
-        audio_output = std::make_unique<AudioOutput>(*audio.codec);
+        audio_worker = std::make_unique<AudioDecoderWorker>(std::move(audio.codec));
     }
 
     PacketPtr packet(av_packet_alloc());
@@ -793,11 +1194,17 @@ int run(const std::string& path)
     }
 
     bool running = true;
+    bool show_overlay = false;
+    std::uint64_t frame_number = 0;
+    PerformanceReport report(path, video_info);
     auto playback_start = std::chrono::steady_clock::now();
     auto last_loop_time = playback_start;
 
     while (running) {
         const EventState events = pump_events(running);
+        if (events.overlay_toggle) {
+            show_overlay = !show_overlay;
+        }
         const auto now = std::chrono::steady_clock::now();
         const auto loop_gap = now - last_loop_time;
         if (events.window_interaction || loop_gap > std::chrono::milliseconds(250)) {
@@ -809,7 +1216,11 @@ int run(const std::string& path)
             break;
         }
 
+        const auto demux_start = std::chrono::steady_clock::now();
         const int read_result = av_read_frame(format.get(), packet.get());
+        const auto demux_end = std::chrono::steady_clock::now();
+        const PacketTiming packet_timing{
+            std::chrono::duration<double, std::milli>(demux_end - demux_start).count()};
         if (read_result == AVERROR_EOF) {
             break;
         }
@@ -821,20 +1232,27 @@ int run(const std::string& path)
                 *video.codec,
                 video.stream_index,
                 *packet,
+                packet_timing,
                 *video_output,
-                audio_output.get(),
+                audio_worker ? &audio_worker->output() : nullptr,
+                report,
+                frame_number,
+                show_overlay,
                 playback_start,
                 running);
-        } else if (audio.codec && packet->stream_index == audio.stream_index) {
-            decode_audio_packet(*audio.codec, *packet, *audio_output);
+        } else if (audio_worker && packet->stream_index == audio.stream_index) {
+            audio_worker->push(*packet);
         }
 
         av_packet_unref(packet.get());
     }
 
-    while (audio_output && audio_output->queued_size() > 0) {
+    while (audio_worker && audio_worker->output().queued_size() > 0) {
         const auto next_poll = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
-        pump_events(running);
+        const EventState events = pump_events(running);
+        if (events.overlay_toggle) {
+            show_overlay = !show_overlay;
+        }
         if (!running) {
             break;
         }
