@@ -1,5 +1,7 @@
+.idea/
 build/
 out/
+reports/*.csv
 .vs/
 .vscode/
 *.user
