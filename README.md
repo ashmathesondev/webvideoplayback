@@ -2,6 +2,10 @@
 
 C++ and SDL2 application scaffold for local web media playback.
 
+## Architecture Docs
+
+- [Native Decoder Backend Plan](docs/native-decoder-backend-plan.md)
+
 ## Dependencies
 
 This project uses CMake and vcpkg manifest mode.
