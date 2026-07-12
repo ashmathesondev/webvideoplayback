@@ -14,6 +14,7 @@ extern "C" {
 }
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace webvideoplayback::player {
@@ -79,6 +80,37 @@ struct VideoStreamInfo {
 // Timing captured while demuxing one packet.
 struct PacketTiming {
     double demux_ms = 0.0;
+};
+
+struct DecodedVideoFrame {
+    FramePtr frame;
+    double media_time_s = 0.0;
+    PacketTiming packet_timing;
+    double send_packet_ms = 0.0;
+    double decode_ms = 0.0;
+};
+
+struct DecodedAudioFrame {
+    FramePtr frame;
+    double media_end_s = 0.0;
+};
+
+struct MediaInfo {
+    VideoStreamInfo video;
+    bool has_video = false;
+    bool has_audio = false;
+};
+
+class IMediaDecoder {
+public:
+    virtual ~IMediaDecoder() = default;
+
+    virtual MediaInfo media_info() const = 0;
+    virtual void start() = 0;
+    virtual void stop() = 0;
+    virtual void seek(double seconds) = 0;
+    virtual std::optional<DecodedVideoFrame> pop_video_frame() = 0;
+    virtual std::optional<DecodedAudioFrame> pop_audio_frame() = 0;
 };
 
 // Opens a local file or URL and reads stream metadata.

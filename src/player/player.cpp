@@ -376,14 +376,6 @@ private:
     std::thread worker_;
 };
 
-struct DecodedVideoFrame {
-    FramePtr frame;
-    double media_time_s = 0.0;
-    PacketTiming packet_timing;
-    double send_packet_ms = 0.0;
-    double decode_ms = 0.0;
-};
-
 // Demuxes the shared media stream and decodes video frames off the UI thread.
 // Audio packets are forwarded to AudioDecoderWorker from the same demux loop.
 class VideoDecoderWorker {
@@ -572,11 +564,11 @@ int run(const std::string& path, bool performance_report_enabled)
         throw std::runtime_error("input has no decodable audio or video streams");
     }
 
-    std::unique_ptr<VideoOutput> video_output;
+    std::unique_ptr<IRenderSink> render_sink;
     VideoStreamInfo video_info;
     if (video.codec) {
         video_info = video_stream_info(*format->streams[video.stream_index], *video.codec);
-        video_output = std::make_unique<VideoOutput>(*video.codec);
+        render_sink = std::make_unique<SdlTextureRenderSink>(*video.codec);
     }
 
     PlaybackPause playback_pause;
@@ -748,14 +740,14 @@ int run(const std::string& path, bool performance_report_enabled)
                 }
             }
 
-            const VideoFrameTiming timing = video_output->render(
+            const VideoFrameTiming timing = render_sink->present(RenderFrame{
                 *decoded->frame,
                 audio_output,
                 decoded->packet_timing.demux_ms,
                 decoded->send_packet_ms,
                 decoded->decode_ms,
-                show_overlay);
-            const SDL_Rect video_rect = video_output->current_video_rect();
+                show_overlay});
+            const SDL_Rect video_rect = render_sink->current_video_rect();
 
             PerformanceSample sample;
             sample.frame_number = ++frame_number;
@@ -768,8 +760,8 @@ int run(const std::string& path, bool performance_report_enabled)
             sample.av_sync_ms =
                 audio_worker != nullptr && audio_worker->has_clock() ? (target_seconds - audio_worker->audio_playback_seconds()) * 1000.0 : 0.0;
             sample.audio_underruns = audio_output != nullptr ? audio_output->underruns() : 0;
-            sample.window_width = video_output->window_width();
-            sample.window_height = video_output->window_height();
+            sample.window_width = render_sink->window_width();
+            sample.window_height = render_sink->window_height();
             sample.display_width = video_rect.w;
             sample.display_height = video_rect.h;
             report.write(sample);

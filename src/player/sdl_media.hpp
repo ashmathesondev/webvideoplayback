@@ -402,10 +402,30 @@ private:
     mutable std::atomic_uint64_t underruns_ = 0;
 };
 
-// Owns all SDL video resources. Only the main thread calls this class.
-class VideoOutput {
+struct RenderFrame {
+    const AVFrame& cpu_frame;
+    const AudioOutput* audio = nullptr;
+    double demux_ms = 0.0;
+    double send_packet_ms = 0.0;
+    double decode_ms = 0.0;
+    bool show_overlay = false;
+};
+
+class IRenderSink {
 public:
-    explicit VideoOutput(const AVCodecContext& codec)
+    virtual ~IRenderSink() = default;
+
+    virtual void resize(int width, int height) = 0;
+    virtual VideoFrameTiming present(const RenderFrame& frame) = 0;
+    virtual SDL_Rect current_video_rect() const = 0;
+    virtual int window_width() const = 0;
+    virtual int window_height() const = 0;
+};
+
+// Owns all SDL texture resources. Only the main thread calls this class.
+class SdlTextureRenderSink final : public IRenderSink {
+public:
+    explicit SdlTextureRenderSink(const AVCodecContext& codec)
     {
         window_.reset(SDL_CreateWindow(
             "Web Video Playback",
@@ -458,13 +478,14 @@ public:
         }
     }
 
-    VideoFrameTiming render(
-        const AVFrame& frame,
-        const AudioOutput* audio,
-        double demux_ms,
-        double send_packet_ms,
-        double decode_ms,
-        bool show_overlay)
+    void resize(int width, int height) override
+    {
+        if (width > 0 && height > 0) {
+            SDL_SetWindowSize(window_.get(), width, height);
+        }
+    }
+
+    VideoFrameTiming present(const RenderFrame& frame) override
     {
         const auto total_start = std::chrono::steady_clock::now();
 
@@ -474,8 +495,8 @@ public:
             const int linesize[] = {width_ * 4};
             sws_scale(
                 scaler_.get(),
-                frame.data,
-                frame.linesize,
+                frame.cpu_frame.data,
+                frame.cpu_frame.linesize,
                 0,
                 height_,
                 scaled_pixels,
@@ -488,12 +509,12 @@ public:
             if (SDL_UpdateYUVTexture(
                     texture_.get(),
                     nullptr,
-                    frame.data[0],
-                    frame.linesize[0],
-                    frame.data[1],
-                    frame.linesize[1],
-                    frame.data[2],
-                    frame.linesize[2])
+                    frame.cpu_frame.data[0],
+                    frame.cpu_frame.linesize[0],
+                    frame.cpu_frame.data[1],
+                    frame.cpu_frame.linesize[1],
+                    frame.cpu_frame.data[2],
+                    frame.cpu_frame.linesize[2])
                 != 0) {
                 throw std::runtime_error(std::string("SDL_UpdateYUVTexture failed: ") + SDL_GetError());
             }
@@ -518,8 +539,8 @@ public:
         SDL_RenderCopy(renderer_.get(), texture_.get(), nullptr, &video_rect);
         const auto copy_end = std::chrono::steady_clock::now();
         const auto overlay_start = std::chrono::steady_clock::now();
-        if (show_overlay) {
-            draw_debug_overlay(make_debug_stats(audio, window_width, window_height, video_rect));
+        if (frame.show_overlay) {
+            draw_debug_overlay(make_debug_stats(frame.audio, window_width, window_height, video_rect));
         }
         const auto overlay_end = std::chrono::steady_clock::now();
         const auto swap_start = std::chrono::steady_clock::now();
@@ -528,9 +549,9 @@ public:
         const auto present_end = std::chrono::steady_clock::now();
 
         const auto total_end = std::chrono::steady_clock::now();
-        last_timing_.demux_ms = demux_ms;
-        last_timing_.send_packet_ms = send_packet_ms;
-        last_timing_.decode_ms = decode_ms;
+        last_timing_.demux_ms = frame.demux_ms;
+        last_timing_.send_packet_ms = frame.send_packet_ms;
+        last_timing_.decode_ms = frame.decode_ms;
         last_timing_.convert_ms = std::chrono::duration<double, std::milli>(convert_end - convert_start).count();
         last_timing_.upload_ms = std::chrono::duration<double, std::milli>(upload_end - upload_start).count();
         last_timing_.present_ms = std::chrono::duration<double, std::milli>(present_end - present_start).count();
@@ -542,7 +563,7 @@ public:
         return last_timing_;
     }
 
-    int window_width() const
+    int window_width() const override
     {
         int width = 0;
         int height = 0;
@@ -550,7 +571,7 @@ public:
         return width;
     }
 
-    int window_height() const
+    int window_height() const override
     {
         int width = 0;
         int height = 0;
@@ -558,7 +579,7 @@ public:
         return height;
     }
 
-    SDL_Rect current_video_rect() const
+    SDL_Rect current_video_rect() const override
     {
         int width = 0;
         int height = 0;
