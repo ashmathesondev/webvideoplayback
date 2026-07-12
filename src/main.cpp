@@ -620,6 +620,34 @@ public:
         }
     }
 
+    void mark_media_end(double media_end_seconds)
+    {
+        const auto now = std::chrono::steady_clock::now().time_since_epoch();
+        const double now_seconds = std::chrono::duration<double>(now).count();
+        const double queued_seconds = queued_milliseconds() / 1000.0;
+
+        clock_media_end_seconds_.store(media_end_seconds);
+        clock_wall_seconds_.store(now_seconds);
+        clock_queued_seconds_.store(queued_seconds);
+        clock_ready_.store(true);
+    }
+
+    double playback_seconds() const
+    {
+        if (!clock_ready_.load()) {
+            return 0.0;
+        }
+
+        const auto now = std::chrono::steady_clock::now().time_since_epoch();
+        const double now_seconds = std::chrono::duration<double>(now).count();
+        const double media_end_seconds = clock_media_end_seconds_.load();
+        const double wall_seconds = clock_wall_seconds_.load();
+        const double queued_seconds = clock_queued_seconds_.load();
+        const double elapsed_seconds = std::max(0.0, now_seconds - wall_seconds);
+        const double remaining_seconds = std::max(0.0, queued_seconds - elapsed_seconds);
+        return media_end_seconds - remaining_seconds;
+    }
+
     Uint32 queued_size() const
     {
         const Uint32 size = SDL_GetQueuedAudioSize(device_);
@@ -692,6 +720,10 @@ private:
     SwrPtr resampler_;
     std::vector<std::uint8_t> buffer_;
     double target_latency_ms_ = 150.0;
+    std::atomic_bool clock_ready_ = false;
+    std::atomic<double> clock_media_end_seconds_ = 0.0;
+    std::atomic<double> clock_wall_seconds_ = 0.0;
+    std::atomic<double> clock_queued_seconds_ = 0.0;
     mutable std::atomic_bool was_empty_ = false;
     mutable std::atomic_uint64_t underruns_ = 0;
 };
@@ -1085,7 +1117,9 @@ void decode_audio_packet(
         }
         throw_if_error(result, "receive audio frame");
         output.queue(*frame);
-        last_audio_end_seconds.store(frame_end_seconds(*frame, stream));
+        const double audio_end_seconds = frame_end_seconds(*frame, stream);
+        output.mark_media_end(audio_end_seconds);
+        last_audio_end_seconds.store(audio_end_seconds);
         av_frame_unref(frame.get());
     }
 }
@@ -1144,7 +1178,7 @@ public:
 
     double audio_playback_seconds() const
     {
-        return last_audio_end_seconds_.load() - (output_.queued_milliseconds() / 1000.0);
+        return output_.playback_seconds();
     }
 
     bool has_clock() const
