@@ -1,0 +1,9 @@
+{
+  "port": 8080,
+  "files": [
+    {
+      "route": "/sample.mp4",
+      "path": "E:\\path\\to\\sample.mp4"
+    }
+  ]
+}
