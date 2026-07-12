@@ -1,5 +1,11 @@
 #pragma once
 
+// FFmpeg support layer.
+//
+// This module owns FFmpeg RAII wrappers, decoder setup, timestamp helpers, and
+// error conversion. SDL and playback policy code consume these types instead of
+// directly managing FFmpeg lifetimes.
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -12,14 +18,19 @@ extern "C" {
 
 namespace webvideoplayback::player {
 
+// Converts a negative FFmpeg error code to readable text.
 std::string av_error(int code);
+
+// Throws std::runtime_error when an FFmpeg call returns an error.
 void throw_if_error(int code, const std::string& context);
 
+// Initializes process-wide FFmpeg networking for URL playback.
 struct AvNetworkGuard {
     AvNetworkGuard();
     ~AvNetworkGuard();
 };
 
+// unique_ptr deleters for FFmpeg allocation families.
 struct FormatDeleter {
     void operator()(AVFormatContext* context) const;
 };
@@ -51,11 +62,13 @@ using PacketPtr = std::unique_ptr<AVPacket, PacketDeleter>;
 using SwsPtr = std::unique_ptr<SwsContext, SwsDeleter>;
 using SwrPtr = std::unique_ptr<SwrContext, SwrDeleter>;
 
+// Decoder plus stream index returned by stream discovery.
 struct StreamDecoder {
     int stream_index = -1;
     CodecContextPtr codec;
 };
 
+// Metadata included in performance reports.
 struct VideoStreamInfo {
     std::string codec_name;
     std::string pixel_format;
@@ -63,14 +76,24 @@ struct VideoStreamInfo {
     int bit_rate = 0;
 };
 
+// Timing captured while demuxing one packet.
 struct PacketTiming {
     double demux_ms = 0.0;
 };
 
+// Opens a local file or URL and reads stream metadata.
 FormatPtr open_input(const std::string& path);
+
+// Derives stream frame rate from FFmpeg metadata.
 double stream_fps(const AVStream& stream);
+
+// Builds user-facing video metadata from the stream and codec.
 VideoStreamInfo video_stream_info(const AVStream& stream, const AVCodecContext& codec);
+
+// Finds and opens the best decoder for the requested media type.
 StreamDecoder open_decoder(AVFormatContext& format, AVMediaType type);
+
+// Converts FFmpeg frame or packet timestamps to media seconds.
 double frame_seconds(const AVFrame& frame, const AVStream& stream);
 double frame_end_seconds(const AVFrame& frame, const AVStream& stream);
 double packet_seconds(const AVPacket& packet, const AVStream& stream);

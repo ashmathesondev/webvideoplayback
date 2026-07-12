@@ -1,5 +1,8 @@
 #include "player/av_support.hpp"
 
+// This file contains FFmpeg-only behavior. Keeping it separate avoids leaking
+// FFmpeg lifetime rules into the playback loop and SDL renderer.
+
 extern "C" {
 #include <libavutil/error.h>
 #include <libavutil/pixdesc.h>
@@ -74,6 +77,8 @@ FormatPtr open_input(const std::string& path)
 
 double stream_fps(const AVStream& stream)
 {
+    // avg_frame_rate is usually the stable playback rate. r_frame_rate is a
+    // fallback for files that do not populate the average.
     const AVRational rate = stream.avg_frame_rate.num != 0 ? stream.avg_frame_rate : stream.r_frame_rate;
     if (rate.num == 0 || rate.den == 0) {
         return 0.0;
@@ -114,6 +119,7 @@ StreamDecoder open_decoder(AVFormatContext& format, AVMediaType type)
 
     CodecContextPtr context(raw_context);
     throw_if_error(avcodec_parameters_to_context(context.get(), stream->codecpar), "copy codec parameters");
+    // Threaded decode improves H.264 throughput without changing ownership.
     context->thread_count = 4;
     context->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
     throw_if_error(avcodec_open2(context.get(), decoder, nullptr), "open decoder");
@@ -123,6 +129,7 @@ StreamDecoder open_decoder(AVFormatContext& format, AVMediaType type)
 
 double frame_seconds(const AVFrame& frame, const AVStream& stream)
 {
+    // best_effort_timestamp accounts for reordered video frames.
     const int64_t timestamp = frame.best_effort_timestamp;
     if (timestamp == AV_NOPTS_VALUE) {
         return 0.0;
@@ -143,6 +150,7 @@ double frame_end_seconds(const AVFrame& frame, const AVStream& stream)
 
 double packet_seconds(const AVPacket& packet, const AVStream& stream)
 {
+    // PTS is preferred. DTS still gives a usable lookahead bound.
     int64_t timestamp = packet.pts;
     if (timestamp == AV_NOPTS_VALUE) {
         timestamp = packet.dts;

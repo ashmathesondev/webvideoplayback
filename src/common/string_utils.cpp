@@ -1,5 +1,9 @@
 #include "common/string_utils.hpp"
 
+// Implementation notes:
+// - The server only needs byte-wise HTTP token handling.
+// - Windows paths are converted through Win32 APIs to preserve Unicode names.
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX

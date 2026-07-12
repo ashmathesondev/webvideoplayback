@@ -1,5 +1,10 @@
 #include "server/network.hpp"
 
+// Winsock-specific socket helpers for the loopback server.
+//
+// HTTP behavior lives in server.cpp. This file only owns socket creation,
+// cleanup, and complete-buffer sends.
+
 #include <ws2tcpip.h>
 
 #include <stdexcept>
