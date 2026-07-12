@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(SDL2 CONFIG REQUIRED)
 find_package(FFMPEG REQUIRED)
+find_package(ftxui CONFIG REQUIRED)
 
 add_executable(webvideoplayback WIN32
     src/main.cpp
@@ -33,6 +34,17 @@ target_link_libraries(webvideoplayback PRIVATE
 
 if(WIN32)
     target_link_libraries(webvideoplayback PRIVATE comdlg32 psapi)
+
+    add_executable(webvideoplayback_test_server
+        src/test_video_server.cpp
+    )
+
+    target_link_libraries(webvideoplayback_test_server PRIVATE ws2_32)
+    target_link_libraries(webvideoplayback_test_server PRIVATE
+        ftxui::screen
+        ftxui::dom
+        ftxui::component
+    )
 endif()
 
 if(MSVC)
