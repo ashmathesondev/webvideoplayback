@@ -22,6 +22,11 @@
       "name": "windows-msvc-vcpkg-release",
       "configurePreset": "windows-msvc-vcpkg",
       "configuration": "Release"
+    },
+    {
+      "name": "windows-msvc-vcpkg-relwithdebinfo",
+      "configurePreset": "windows-msvc-vcpkg",
+      "configuration": "RelWithDebInfo"
     }
   ]
 }

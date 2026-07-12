@@ -17,9 +17,24 @@ This project uses CMake and vcpkg manifest mode.
 
 ## Build
 
+Use the build script to configure and build both targets:
+
+```powershell
+.\scripts\build.ps1                                        # Debug (default)
+.\scripts\build.ps1 -Configuration Release
+.\scripts\build.ps1 -Configuration RelWithDebInfo
+.\scripts\build.ps1 -Configuration Release -Target Server  # server only
+.\scripts\build.ps1 -Configuration Release -Target Player  # player only
+.\scripts\build.ps1 -h                                     # help
+```
+
+Or manually with CMake:
+
 ```powershell
 cmake --preset windows-msvc-vcpkg
 cmake --build --preset windows-msvc-vcpkg-debug
+cmake --build --preset windows-msvc-vcpkg-release
+cmake --build --preset windows-msvc-vcpkg-relwithdebinfo
 ```
 
 ## Run
