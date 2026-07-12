@@ -1,3 +1,9 @@
+// Local HTTP media server for playback tests.
+//
+// The server binds to loopback, serves static files from a configured root, and
+// implements byte-range responses so FFmpeg and browser-like clients can stream
+// media. An FTXUI dashboard shows active transfers, aggregate counters, and
+// recent request events without scrolling the terminal.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 
@@ -5,6 +11,7 @@
 #include <ftxui/component/event.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
+#include <nlohmann/json.hpp>
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -33,7 +40,9 @@
 namespace {
 
 using namespace ftxui;
+using json = nlohmann::json;
 
+// Keeps Winsock initialization tied to process lifetime.
 class WinsockGuard {
 public:
     WinsockGuard()
@@ -50,6 +59,7 @@ public:
     }
 };
 
+// Move-only RAII wrapper for a Winsock SOCKET.
 class Socket {
 public:
     explicit Socket(SOCKET socket = INVALID_SOCKET)
@@ -117,8 +127,10 @@ struct ByteRange {
 struct ServerConfig {
     std::filesystem::path root = std::filesystem::current_path();
     std::uint16_t port = 8080;
+    std::map<std::string, std::filesystem::path> files;
 };
 
+// Live transfer state shown in the Streams dashboard section.
 struct StreamProgress {
     std::uint64_t id = 0;
     std::string method;
@@ -132,6 +144,8 @@ struct StreamProgress {
     std::chrono::steady_clock::time_point started_at = std::chrono::steady_clock::now();
 };
 
+// Shared server counters and UI state. Protected fields are grouped here so the
+// request workers and UI thread use one lock consistently.
 struct ServerStats {
     std::atomic<std::uint64_t> next_request_id = 0;
     std::atomic<std::uint64_t> total_requests = 0;
@@ -145,6 +159,7 @@ struct ServerStats {
     std::vector<std::string> events;
 };
 
+// Tracks active request count through early returns.
 struct ActiveRequest {
     explicit ActiveRequest(ServerStats& stats)
         : stats_(stats)
@@ -160,6 +175,7 @@ struct ActiveRequest {
     ServerStats& stats_;
 };
 
+// Result summary for one file transfer.
 struct TransferResult {
     int status = 200;
     std::uint64_t bytes_sent = 0;
@@ -198,6 +214,29 @@ std::string format_bytes(std::uint64_t bytes)
     return stream.str();
 }
 
+std::string format_duration(std::int64_t total_seconds)
+{
+    const std::int64_t days = total_seconds / 86400;
+    total_seconds %= 86400;
+    const std::int64_t hours = total_seconds / 3600;
+    total_seconds %= 3600;
+    const std::int64_t minutes = total_seconds / 60;
+    const std::int64_t seconds = total_seconds % 60;
+
+    std::ostringstream stream;
+    if (days > 0) {
+        stream << days << "d ";
+    }
+    if (days > 0 || hours > 0) {
+        stream << hours << "h ";
+    }
+    if (days > 0 || hours > 0 || minutes > 0) {
+        stream << minutes << "m ";
+    }
+    stream << seconds << "s";
+    return stream.str();
+}
+
 std::string short_text(std::string text, std::size_t width)
 {
     if (text.size() <= width) {
@@ -207,6 +246,60 @@ std::string short_text(std::string text, std::size_t width)
         return text.substr(0, width);
     }
     return text.substr(0, width - 3) + "...";
+}
+
+std::string normalize_route(std::string value)
+{
+    if (value.empty()) {
+        throw std::runtime_error("empty file route");
+    }
+    if (value.front() != '/') {
+        value.insert(value.begin(), '/');
+    }
+    return value;
+}
+
+ServerConfig load_server_config(const std::filesystem::path& path)
+{
+    std::ifstream file(path);
+    if (!file) {
+        throw std::runtime_error("failed to open config file: " + path.string());
+    }
+
+    json document;
+    file >> document;
+
+    ServerConfig config;
+    if (document.contains("root")) {
+        config.root = document.at("root").get<std::string>();
+    }
+    if (document.contains("port")) {
+        const int port = document.at("port").get<int>();
+        if (port <= 0 || port > 65535) {
+            throw std::runtime_error("config port is out of range");
+        }
+        config.port = static_cast<std::uint16_t>(port);
+    }
+
+    if (!document.contains("files") || !document.at("files").is_array()) {
+        throw std::runtime_error("config must contain a files array");
+    }
+
+    const std::filesystem::path config_base = path.parent_path().empty() ? std::filesystem::current_path() : path.parent_path();
+    for (const json& item : document.at("files")) {
+        if (!item.contains("route") || !item.contains("path")) {
+            throw std::runtime_error("each file entry needs route and path");
+        }
+
+        const std::string route = normalize_route(item.at("route").get<std::string>());
+        std::filesystem::path media_path = item.at("path").get<std::string>();
+        if (media_path.is_relative()) {
+            media_path = config_base / media_path;
+        }
+        config.files[route] = std::filesystem::weakly_canonical(media_path);
+    }
+
+    return config;
 }
 
 Element dashboard_view(
@@ -274,13 +367,14 @@ Element dashboard_view(
                separator(),
                hbox(text("Root: "), text(short_text(root, 112))),
                hbox(text("URL:  "), text("http://127.0.0.1:" + std::to_string(port) + "/")),
+               hbox(text("Files: "), text(std::to_string(config.files.size()))),
                text("Press Q to stop.") | dim,
                separator(),
                window(text("Streams"), vbox(std::move(stream_rows)) | flex),
                window(
                    text("General"),
                    vbox({
-                       text("uptime:                 " + std::to_string(uptime) + "s"),
+                       text("uptime:                 " + format_duration(uptime)),
                        text("active streams:         " + std::to_string(stats->active_requests.load())),
                        text("started streams:        " + std::to_string(stats->total_requests.load())),
                        text("completed streams:      " + std::to_string(stats->completed_requests.load())),
@@ -397,6 +491,7 @@ std::string url_decode(std::string_view value)
     return decoded;
 }
 
+// Resolves URL paths against either configured file routes or the root.
 std::filesystem::path resolve_request_path(const std::filesystem::path& root, std::string target)
 {
     const std::size_t query = target.find('?');
@@ -425,6 +520,26 @@ std::filesystem::path resolve_request_path(const std::filesystem::path& root, st
     }
 
     return requested;
+}
+
+std::filesystem::path resolve_request_path(const ServerConfig& config, std::string target)
+{
+    const std::size_t query = target.find('?');
+    if (query != std::string::npos) {
+        target.resize(query);
+    }
+
+    target = normalize_route(url_decode(target));
+    const auto configured = config.files.find(target);
+    if (configured != config.files.end()) {
+        return configured->second;
+    }
+
+    if (!config.files.empty()) {
+        throw std::runtime_error("route is not listed in config");
+    }
+
+    return resolve_request_path(config.root, target);
 }
 
 std::string content_type(const std::filesystem::path& path)
@@ -519,6 +634,7 @@ std::optional<Request> read_request(SOCKET socket)
     return request;
 }
 
+// Sends either a full response or an HTTP range response.
 TransferResult send_file(
     SOCKET socket,
     const Request& request,
@@ -604,6 +720,7 @@ TransferResult send_file(
     return transfer;
 }
 
+// Handles one client connection. Each accepted socket runs on its own thread.
 void handle_client(SOCKET socket, const ServerConfig& config, std::shared_ptr<ServerStats> stats)
 {
     const ActiveRequest active(*stats);
@@ -661,7 +778,7 @@ void handle_client(SOCKET socket, const ServerConfig& config, std::shared_ptr<Se
 
     std::filesystem::path path;
     try {
-        path = resolve_request_path(config.root, request->target);
+        path = resolve_request_path(config, request->target);
     } catch (const std::exception&) {
         send_status(socket, 403, "Forbidden");
         stats->failed_requests.fetch_add(1);
@@ -728,7 +845,9 @@ ServerConfig parse_args(int argc, char** argv)
     ServerConfig config;
     for (int index = 1; index < argc; ++index) {
         const std::string arg = argv[index];
-        if (arg == "--root" && index + 1 < argc) {
+        if (arg == "--config" && index + 1 < argc) {
+            config = load_server_config(argv[++index]);
+        } else if (arg == "--root" && index + 1 < argc) {
             config.root = argv[++index];
         } else if (arg == "--port" && index + 1 < argc) {
             const std::optional<std::uint64_t> port = parse_u64(argv[++index]);
@@ -737,7 +856,7 @@ ServerConfig parse_args(int argc, char** argv)
             }
             config.port = static_cast<std::uint16_t>(*port);
         } else {
-            throw std::runtime_error("usage: webvideoplayback_test_server --root <dir> --port <port>");
+            throw std::runtime_error("usage: webvideoplayback_test_server --config <file> [--port <port>]");
         }
     }
     return config;
@@ -768,6 +887,7 @@ Socket create_listener(std::uint16_t port)
     return listener;
 }
 
+// Owns the UI loop, accept loop, and worker thread lifetime.
 void serve(const ServerConfig& config)
 {
     const Socket listener = create_listener(config.port);

@@ -51,6 +51,12 @@ server totals, and recent output events.
 .\build\windows-msvc-vcpkg\Debug\webvideoplayback_test_server.exe --root E:\path\to\media --port 8080
 ```
 
+Or serve an explicit file list:
+
+```powershell
+.\build\windows-msvc-vcpkg\Debug\webvideoplayback_test_server.exe --config .\server-config.example.json
+```
+
 Open media through URLs like:
 
 ```text
@@ -62,13 +68,19 @@ Press `Q` in the server terminal to stop it.
 For the Real Genius test file, run:
 
 ```powershell
-.\scripts\serve-real-genius.ps1
+.\scripts\serve-videos.ps1
 ```
 
 Then play it from the test server:
 
 ```powershell
 .\scripts\play-real-genius-stream.ps1
+```
+
+The Real Genius route is:
+
+```text
+http://127.0.0.1:8080/real-genius.mp4
 ```
 
 Seeking, subtitles, playlists, and hardware decoding are natural next steps.

@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(SDL2 CONFIG REQUIRED)
 find_package(FFMPEG REQUIRED)
 find_package(ftxui CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(webvideoplayback WIN32
     src/main.cpp
@@ -44,6 +45,7 @@ if(WIN32)
         ftxui::screen
         ftxui::dom
         ftxui::component
+        nlohmann_json::nlohmann_json
     )
 endif()
 

@@ -4,6 +4,7 @@
   "dependencies": [
     "sdl2",
     "ftxui",
+    "nlohmann-json",
     {
       "name": "ffmpeg",
       "default-features": true,
