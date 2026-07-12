@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web Video Playback — Project Overview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-body: 'Outfit', system-ui, sans-serif;
+    --font-mono: 'Space Mono', 'SF Mono', Consolas, monospace;
+    --bg: #faf7f4;
+    --surface: #ffffff;
+    --surface2: #f5f0ea;
+    --surface-elevated: #fffcf8;
+    --border: rgba(0,0,0,0.07);
+    --border-bright: rgba(0,0,0,0.14);
+    --text: #2a1f14;
+    --text-dim: #8a7b6e;
+    --terracotta: #b84b1f;
+    --terracotta-dim: rgba(184,75,31,0.08);
+    --sage: #4f7c18;
+    --sage-dim: rgba(79,124,24,0.08);
+    --teal: #0f6e69;
+    --teal-dim: rgba(15,110,105,0.08);
+    --amber: #b06b00;
+    --amber-dim: rgba(176,107,0,0.08);
+    --plum: #8b2252;
+    --plum-dim: rgba(139,34,82,0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1410;
+      --surface: #231c16;
+      --surface2: #2e2419;
+      --surface-elevated: #342a1e;
+      --border: rgba(255,255,255,0.06);
+      --border-bright: rgba(255,255,255,0.13);
+      --text: #ede3d8;
+      --text-dim: #a6907e;
+      --terracotta: #f97316;
+      --terracotta-dim: rgba(249,115,22,0.12);
+      --sage: #a3e635;
+      --sage-dim: rgba(163,230,53,0.1);
+      --teal: #5eead4;
+      --teal-dim: rgba(94,234,212,0.1);
+      --amber: #fbbf24;
+      --amber-dim: rgba(251,191,36,0.1);
+      --plum: #f9a8d4;
+      --plum-dim: rgba(249,168,212,0.1);
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(ellipse at 15% 5%, var(--terracotta-dim) 0%, transparent 45%),
+      radial-gradient(ellipse at 85% 90%, var(--sage-dim) 0%, transparent 40%);
+    color: var(--text);
+    font-family: var(--font-body);
+    padding: 48px 40px;
+    min-height: 100vh;
+    overflow-wrap: break-word;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeScale {
+    from { opacity: 0; transform: scale(0.93); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .anim-up {
+    animation: fadeUp 0.45s ease-out both;
+    animation-delay: calc(var(--i, 0) * 0.07s);
+  }
+  .anim-scale {
+    animation: fadeScale 0.4s ease-out both;
+    animation-delay: calc(var(--i, 0) * 0.07s);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-delay: 0ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+  h1 {
+    font-size: clamp(32px, 5vw, 52px);
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    line-height: 1.1;
+    margin-bottom: 10px;
+    text-wrap: balance;
+  }
+  p { line-height: 1.7; font-size: 15px; }
+  .tag {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    padding: 3px 9px;
+    border-radius: 4px;
+    display: inline-block;
+  }
+  .tag--terra { background: var(--terracotta-dim); color: var(--terracotta); }
+  .tag--teal  { background: var(--teal-dim);       color: var(--teal); }
+  .tag--sage  { background: var(--sage-dim);        color: var(--sage); }
+  .tag--amber { background: var(--amber-dim);       color: var(--amber); }
+  .diagram {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+    max-width: 1060px;
+    margin: 0 auto;
+  }
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px 28px;
+  }
+  .section--hero {
+    background: var(--surface-elevated);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+    border-color: color-mix(in srgb, var(--border) 40%, var(--terracotta) 60%);
+    padding: 32px 36px;
+  }
+  .section--recessed {
+    background: var(--surface2);
+    box-shadow: inset 0 1px 4px rgba(0,0,0,0.04);
+  }
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-label .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .section--terra .section-label { color: var(--terracotta); }
+  .section--terra .dot { background: var(--terracotta); }
+  .section--terra { border-color: color-mix(in srgb, var(--border) 60%, var(--terracotta) 40%); }
+  .section--teal .section-label { color: var(--teal); }
+  .section--teal .dot { background: var(--teal); }
+  .section--teal { border-color: color-mix(in srgb, var(--border) 60%, var(--teal) 40%); }
+  .section--sage .section-label { color: var(--sage); }
+  .section--sage .dot { background: var(--sage); }
+  .section--sage { border-color: color-mix(in srgb, var(--border) 60%, var(--sage) 40%); }
+  .section--amber .section-label { color: var(--amber); }
+  .section--amber .dot { background: var(--amber); }
+  .section--amber { border-color: color-mix(in srgb, var(--border) 60%, var(--amber) 40%); }
+  .section--plum .section-label { color: var(--plum); }
+  .section--plum .dot { background: var(--plum); }
+  .section--plum { border-color: color-mix(in srgb, var(--border) 60%, var(--plum) 40%); }
+  .inner-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .inner-grid--4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+  .ve-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    min-width: 0;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .ve-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+  }
+  .ve-card .title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 6px;
+  }
+  .ve-card .desc {
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .flow-arrow {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 4px 0;
+  }
+  .flow-arrow svg {
+    width: 20px; height: 20px;
+    fill: none;
+    stroke: var(--border-bright);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .pipe-step {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    min-width: 130px;
+    flex-shrink: 0;
+    text-align: center;
+  }
+  .pipe-step .num {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-bottom: 5px;
+  }
+  .pipe-step .name { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+  .pipe-step .detail { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+  .pipe-step--terra { border-color: var(--terracotta-dim); }
+  .pipe-step--terra .num { color: var(--terracotta); }
+  .pipe-step--teal { border-color: var(--teal-dim); }
+  .pipe-step--teal .num { color: var(--teal); }
+  .pipe-step--sage { border-color: var(--sage-dim); }
+  .pipe-step--sage .num { color: var(--sage); }
+  .pipe-step--amber { border-color: var(--amber-dim); }
+  .pipe-step--amber .num { color: var(--amber); }
+  .pipe-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 4px;
+    color: var(--border-bright);
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px;
+  }
+  .kpi-card {
+    background: var(--surface-elevated);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  }
+  .kpi-card .value {
+    font-size: 38px;
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .kpi-card .label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+  }
+  .node-list { list-style: none; font-size: 13px; line-height: 1.9; }
+  .node-list li { padding-left: 16px; position: relative; }
+  .node-list li::before {
+    content: '›';
+    color: var(--text-dim);
+    font-weight: 700;
+    position: absolute;
+    left: 0;
+  }
+  code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--terracotta-dim);
+    color: var(--terracotta);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  .callout {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--terracotta);
+    border-radius: 0 10px 10px 0;
+    padding: 14px 18px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-dim);
+  }
+  .callout strong { color: var(--text); }
+  .mermaid-wrap {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 32px 24px;
+    overflow: auto;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 360px;
+    cursor: grab;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .mermaid-wrap.is-panning { cursor: grabbing; user-select: none; }
+  .mermaid-wrap .mermaid { zoom: 1.3; }
+  .zoom-controls {
+    position: absolute;
+    top: 8px; right: 8px;
+    display: flex;
+    gap: 2px;
+    z-index: 10;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px;
+  }
+  .zoom-controls button {
+    width: 28px; height: 28px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .zoom-controls button:hover { background: var(--border); color: var(--text); }
+  .mermaid .nodeLabel { color: var(--text) !important; }
+  .mermaid .edgeLabel { color: var(--text-dim) !important; background-color: var(--bg) !important; }
+  .mermaid .edgeLabel rect { fill: var(--bg) !important; }
+  .top-nav {
+    max-width: 1060px;
+    margin: 0 auto 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .top-nav a {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--teal);
+    text-decoration: none;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .top-nav a:hover { background: var(--teal-dim); border-color: var(--teal); }
+  .page-header {
+    max-width: 1060px;
+    margin: 0 auto 40px;
+  }
+  .page-header .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--terracotta);
+    margin-bottom: 12px;
+  }
+  .page-header .subtitle {
+    font-size: 16px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    max-width: 640px;
+    margin-top: 12px;
+  }
+  @media (max-width: 768px) {
+    body { padding: 24px 16px; }
+    .inner-grid, .inner-grid--4 { grid-template-columns: 1fr; }
+    .pipeline { flex-wrap: wrap; gap: 8px; }
+    .pipe-arrow { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="top-nav">
+  <span class="tag tag--terra">Web Video Playback</span>
+  <a href="deep-dive.html">Deep Dive &rarr;</a>
+</div>
+
+<div class="page-header anim-up" style="--i:0">
+  <div class="eyebrow">Project Overview</div>
+  <h1>How does a video player actually work?</h1>
+  <p class="subtitle">This C++ project builds a real media player from scratch — showing every step from opening a video file to rendering pixels on screen and playing audio through your speakers. It also includes a local HTTP streaming server for testing network playback.</p>
+</div>
+
+<div class="diagram">
+
+  <!-- KPI row -->
+  <div class="kpi-row">
+    <div class="kpi-card anim-scale" style="--i:1">
+      <div class="value" style="color:var(--terracotta)">2</div>
+      <div class="label">Executables Built</div>
+    </div>
+    <div class="kpi-card anim-scale" style="--i:2">
+      <div class="value" style="color:var(--teal)">4</div>
+      <div class="label">C++ Libraries Used</div>
+    </div>
+    <div class="kpi-card anim-scale" style="--i:3">
+      <div class="value" style="color:var(--sage)">3</div>
+      <div class="label">Worker Threads</div>
+    </div>
+    <div class="kpi-card anim-scale" style="--i:4">
+      <div class="value" style="color:var(--amber)">C++20</div>
+      <div class="label">Language Standard</div>
+    </div>
+  </div>
+
+  <!-- Architecture Mermaid diagram -->
+  <div class="section section--terra anim-up" style="--i:5">
+    <div class="section-label"><span class="dot"></span> System Architecture</div>
+    <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">How all the pieces connect. Ctrl+scroll or use buttons to zoom. Drag to pan.</p>
+    <div class="mermaid-wrap">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this,1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this,0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset">&#8634;</button>
+      </div>
+      <pre class="mermaid">
+graph TD
+  YOU["You — open a video"]
+
+  subgraph Player["webvideoplayback.exe — The Player"]
+    MAIN["Main Thread\nSDL event loop\nrender each video frame"]
+    VDEC["Video Decoder Thread\nread container, split packets\ndecode compressed video"]
+    ADEC["Audio Decoder Thread\ndecode audio packets\nfeed SDL audio queue"]
+  end
+
+  subgraph Server["webvideoplayback_test_server.exe"]
+    HTTP["HTTP Accept Thread\nlisten on port 8080\nstream files on request"]
+    DASH["FTXUI Dashboard\nlive transfer stats"]
+  end
+
+  YOU -->|"open file or URL"| MAIN
+  MAIN <-->|"decoded video frames"| VDEC
+  VDEC -->|"audio packets"| ADEC
+  ADEC -->|"PCM audio samples"| SDL2
+  MAIN -->|"pixels"| SDL2
+  VDEC <-->|"demux + decode"| FFMPEG
+  ADEC <-->|"decode audio"| FFMPEG
+  SDL2["SDL2 Window + Speaker Output"]
+  FFMPEG["FFmpeg Codec Library"]
+  HTTP -.->|"HTTP byte-range stream"| YOU
+  DASH --- HTTP
+      </pre>
+    </div>
+  </div>
+
+  <div class="flow-arrow anim-up" style="--i:6">
+    <svg viewBox="0 0 20 20"><path d="M10 4 L10 16 M6 12 L10 16 L14 12"/></svg>
+    two separate programs with different jobs
+  </div>
+
+  <!-- The Two Programs -->
+  <div class="section section--teal anim-up" style="--i:7">
+    <div class="section-label"><span class="dot"></span> The Two Programs</div>
+    <div class="inner-grid">
+      <div class="ve-card">
+        <div class="title">webvideoplayback.exe &mdash; The Player</div>
+        <p class="desc" style="margin-bottom:12px">The main media player. Think of it like VLC or Windows Media Player, but built from scratch in this codebase so you can read every line of code that makes it work. It opens video and audio files, decodes them, and plays them back in a resizable window.</p>
+        <ul class="node-list">
+          <li>Launch with no arguments &mdash; a native Windows file picker opens</li>
+          <li>Pass a file path or URL as an argument to skip the picker</li>
+          <li>Press <code>F1</code> to show a real-time debug overlay</li>
+          <li>Press <code>ESC</code> to close the player</li>
+          <li>Uses <code>--performance-report</code> flag to record per-frame timing CSV files</li>
+        </ul>
+      </div>
+      <div class="ve-card">
+        <div class="title">webvideoplayback_test_server.exe &mdash; The Streaming Server</div>
+        <p class="desc" style="margin-bottom:12px">A lightweight web server that serves video files over HTTP from your local machine. This lets you test how the player handles streaming over a network connection &mdash; the same way a website like YouTube streams video to your browser.</p>
+        <ul class="node-list">
+          <li>Binds to <code>localhost:8080</code> by default (configurable)</li>
+          <li>Supports HTTP byte-range requests so the player can seek and resume</li>
+          <li>Shows a live terminal dashboard with active transfer progress bars</li>
+          <li>Configurable via a JSON file listing which files to serve and at which URL paths</li>
+          <li>Press <code>Q</code> in the terminal to stop the server</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="flow-arrow anim-up" style="--i:8">
+    <svg viewBox="0 0 20 20"><path d="M10 4 L10 16 M6 12 L10 16 L14 12"/></svg>
+    four libraries doing the heavy lifting
+  </div>
+
+  <!-- Libraries -->
+  <div class="section section--sage anim-up" style="--i:9">
+    <div class="section-label"><span class="dot"></span> The Four Libraries — What Each One Does</div>
+    <div class="inner-grid">
+      <div class="ve-card">
+        <span class="tag tag--terra" style="margin-bottom:10px;display:inline-block">FFmpeg</span>
+        <div class="title">The Codec and Decoder Engine</div>
+        <p class="desc">FFmpeg understands hundreds of video and audio formats — MP4, WebM, MKV, MP3, AAC, Opus, and many more. When you have a compressed video file, FFmpeg knows how to decompress it into raw pixel data (for the screen) and raw audio samples (for the speakers). Writing all those decoders from scratch would take years; FFmpeg provides them ready to use.</p>
+      </div>
+      <div class="ve-card">
+        <span class="tag tag--teal" style="margin-bottom:10px;display:inline-block">SDL2</span>
+        <div class="title">The Display and Sound Output Layer</div>
+        <p class="desc">SDL2 (Simple DirectMedia Layer) handles everything you actually see and hear: it creates the window, uses the GPU to draw pixels to the screen as fast as possible, and talks to the Windows audio system to play sound. Without SDL2, you would need to write different code for every operating system just to open a window or play a sound.</p>
+      </div>
+      <div class="ve-card">
+        <span class="tag tag--sage" style="margin-bottom:10px;display:inline-block">FTXUI</span>
+        <div class="title">The Terminal Dashboard Library</div>
+        <p class="desc">FTXUI builds text-based user interfaces that run inside a terminal window &mdash; the kind with boxes, progress bars, and tables made of characters. The test server uses FTXUI to show a live dashboard of which files are being streamed, how much data has been sent, and how long each transfer took.</p>
+      </div>
+      <div class="ve-card">
+        <span class="tag tag--amber" style="margin-bottom:10px;display:inline-block">nlohmann-json</span>
+        <div class="title">The JSON Config Parser</div>
+        <p class="desc">A widely used C++ library for reading and writing JSON files. The test server uses it to load a config file that maps URL routes (like <code>/movie.mp4</code>) to actual file paths on disk. This lets you control which files the server serves without recompiling the code.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="flow-arrow anim-up" style="--i:10">
+    <svg viewBox="0 0 20 20"><path d="M10 4 L10 16 M6 12 L10 16 L14 12"/></svg>
+    every frame travels through this pipeline
+  </div>
+
+  <!-- Decode Pipeline -->
+  <div class="section section--amber anim-up" style="--i:11">
+    <div class="section-label"><span class="dot"></span> The Decode Pipeline &mdash; From Compressed File to Pixels on Screen</div>
+    <p style="margin-bottom:18px;color:var(--text-dim);font-size:13px">A video file stores compressed data &mdash; like a very efficient ZIP file for moving images. Each frame goes through these steps before you see it.</p>
+    <div class="pipeline">
+      <div class="pipe-step pipe-step--terra">
+        <div class="num">STEP 1</div>
+        <div class="name">Open File</div>
+        <div class="detail">FFmpeg opens<br>the container<br>format (.mp4, .mkv)</div>
+      </div>
+      <div class="pipe-arrow">&#8594;</div>
+      <div class="pipe-step pipe-step--teal">
+        <div class="num">STEP 2</div>
+        <div class="name">Demux</div>
+        <div class="detail">Split the file into<br>separate video<br>and audio streams</div>
+      </div>
+      <div class="pipe-arrow">&#8594;</div>
+      <div class="pipe-step pipe-step--sage">
+        <div class="num">STEP 3</div>
+        <div class="name">Decode</div>
+        <div class="detail">Decompress each<br>packet into a<br>raw frame</div>
+      </div>
+      <div class="pipe-arrow">&#8594;</div>
+      <div class="pipe-step pipe-step--amber">
+        <div class="num">STEP 4</div>
+        <div class="name">Convert</div>
+        <div class="detail">Convert pixel<br>format to one<br>SDL can display</div>
+      </div>
+      <div class="pipe-arrow">&#8594;</div>
+      <div class="pipe-step pipe-step--terra">
+        <div class="num">STEP 5</div>
+        <div class="name">Upload</div>
+        <div class="detail">Push pixels<br>to a GPU texture<br>via SDL</div>
+      </div>
+      <div class="pipe-arrow">&#8594;</div>
+      <div class="pipe-step pipe-step--teal">
+        <div class="num">STEP 6</div>
+        <div class="name">Render</div>
+        <div class="detail">GPU draws the<br>texture scaled<br>to fit the window</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flow-arrow anim-up" style="--i:12">
+    <svg viewBox="0 0 20 20"><path d="M10 4 L10 16 M6 12 L10 16 L14 12"/></svg>
+    building and running the project
+  </div>
+
+  <!-- Build and Run -->
+  <div class="section section--plum anim-up" style="--i:13">
+    <div class="section-label"><span class="dot"></span> Build and Run</div>
+    <div class="inner-grid">
+      <div class="ve-card">
+        <div class="title">Build (PowerShell)</div>
+        <p class="desc" style="margin-bottom:10px">Uses CMake with vcpkg. All four libraries download and build automatically &mdash; no manual installs needed.</p>
+        <pre style="font-family:var(--font-mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;white-space:pre-wrap;word-break:break-word;line-height:1.7">cmake --preset windows-msvc-vcpkg
+cmake --build --preset windows-msvc-vcpkg-debug</pre>
+      </div>
+      <div class="ve-card">
+        <div class="title">Run the Player</div>
+        <p class="desc" style="margin-bottom:10px">No arguments opens a file picker. Pass a URL or path to skip it.</p>
+        <pre style="font-family:var(--font-mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;white-space:pre-wrap;word-break:break-word;line-height:1.7">.\build\...\webvideoplayback.exe
+
+# Play from test server:
+.\build\...\webvideoplayback.exe `
+  http://127.0.0.1:8080/video.mp4</pre>
+      </div>
+      <div class="ve-card">
+        <div class="title">Run the Test Server</div>
+        <p class="desc" style="margin-bottom:10px">Point it at a folder of media files. Opens a live dashboard in the terminal.</p>
+        <pre style="font-family:var(--font-mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;white-space:pre-wrap;word-break:break-word;line-height:1.7">.\build\...\webvideoplayback_test_server.exe `
+  --root E:\path\to\media `
+  --port 8080</pre>
+      </div>
+      <div class="ve-card">
+        <div class="title">Useful Flags and Settings</div>
+        <ul class="node-list">
+          <li><code>--performance-report</code> &mdash; save per-frame timing CSV to <code>reports/</code></li>
+          <li><code>--config file.json</code> &mdash; server loads explicit file routes from JSON</li>
+          <li><code>WEBVIDEOPLAYBACK_AUDIO_LATENCY_MS</code> &mdash; env var to tune audio buffer size (default 150 ms)</li>
+          <li>Release build path: <code>build/.../Release/webvideoplayback.exe</code></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Callout -->
+  <div class="callout anim-up" style="--i:14">
+    <strong>What makes this project special:</strong> Unlike most media players, this one deliberately exposes every internal timing measurement through the debug overlay (press <code>F1</code>) and optional CSV performance reports. You can see exactly how many milliseconds demuxing, decoding, pixel conversion, GPU upload, and rendering each take per frame &mdash; plus watch how audio and video stay synchronized in real time.
+  </div>
+
+  <!-- Footer nav -->
+  <div style="text-align:center;padding:8px 0 0" class="anim-up" style="--i:15">
+    <a href="deep-dive.html"
+       style="display:inline-block;font-family:var(--font-mono);font-size:13px;color:var(--teal);text-decoration:none;padding:10px 24px;border:1px solid var(--border);border-radius:8px;transition:background 0.15s ease,border-color 0.15s ease;"
+       onmouseover="this.style.background='var(--teal-dim)';this.style.borderColor='var(--teal)'"
+       onmouseout="this.style.background='';this.style.borderColor='var(--border)'">
+      Continue to Deep Dive &rarr;
+    </a>
+  </div>
+
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    look: 'classic',
+    themeVariables: {
+      primaryColor: isDark ? '#1a3a38' : '#d1faf5',
+      primaryBorderColor: isDark ? '#0f6e69' : '#0f6e69',
+      primaryTextColor: isDark ? '#ede3d8' : '#2a1f14',
+      secondaryColor: isDark ? '#2d2218' : '#fef3e6',
+      secondaryBorderColor: isDark ? '#b06b00' : '#b06b00',
+      secondaryTextColor: isDark ? '#ede3d8' : '#2a1f14',
+      tertiaryColor: isDark ? '#1a2314' : '#f5f0ea',
+      tertiaryBorderColor: isDark ? '#4f7c18' : '#4f7c18',
+      tertiaryTextColor: isDark ? '#ede3d8' : '#2a1f14',
+      lineColor: isDark ? '#6b5c4e' : '#a89080',
+      fontSize: '15px',
+      fontFamily: "'Outfit', system-ui, sans-serif",
+    }
+  });
+</script>
+<script>
+  var INITIAL_ZOOM = 1.3;
+  function zoomDiagram(btn, factor) {
+    var wrap = btn.closest('.mermaid-wrap');
+    var target = wrap.querySelector('.mermaid');
+    var current = parseFloat(target.dataset.zoom || INITIAL_ZOOM);
+    var next = Math.min(Math.max(current * factor, 0.5), 5);
+    target.dataset.zoom = next;
+    target.style.zoom = next;
+  }
+  function resetZoom(btn) {
+    var wrap = btn.closest('.mermaid-wrap');
+    var target = wrap.querySelector('.mermaid');
+    target.dataset.zoom = INITIAL_ZOOM;
+    target.style.zoom = INITIAL_ZOOM;
+  }
+  document.querySelectorAll('.mermaid-wrap').forEach(function(wrap) {
+    wrap.addEventListener('wheel', function(e) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      var target = wrap.querySelector('.mermaid');
+      var current = parseFloat(target.dataset.zoom || INITIAL_ZOOM);
+      var next = Math.min(Math.max(current * factor, 0.5), 5);
+      var factor = e.deltaY < 0 ? 1.1 : 0.9;
+      next = Math.min(Math.max(current * factor, 0.5), 5);
+      target.dataset.zoom = next;
+      target.style.zoom = next;
+    }, { passive: false });
+    var startX, startY, scrollL, scrollT;
+    wrap.addEventListener('mousedown', function(e) {
+      if (e.target.closest('.zoom-controls')) return;
+      wrap.classList.add('is-panning');
+      startX = e.clientX; startY = e.clientY;
+      scrollL = wrap.scrollLeft; scrollT = wrap.scrollTop;
+    });
+    window.addEventListener('mousemove', function(e) {
+      if (!wrap.classList.contains('is-panning')) return;
+      wrap.scrollLeft = scrollL - (e.clientX - startX);
+      wrap.scrollTop = scrollT - (e.clientY - startY);
+    });
+    window.addEventListener('mouseup', function() {
+      wrap.classList.remove('is-panning');
+    });
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web Video Playback — Technical Deep Dive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-body: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+    --bg: #0d1117;
+    --bg-grid: rgba(94,234,212,0.025);
+    --surface: #131b23;
+    --surface2: #1a2535;
+    --surface3: #0b0f14;
+    --surface-elevated: #1c2d3d;
+    --border: rgba(94,234,212,0.1);
+    --border-bright: rgba(94,234,212,0.22);
+    --text: #d4e8f0;
+    --text-dim: #6b8899;
+    --text-faint: #3d5566;
+    --teal: #5eead4;
+    --teal-dim: rgba(94,234,212,0.08);
+    --teal-glow: rgba(94,234,212,0.15);
+    --cyan: #22d3ee;
+    --cyan-dim: rgba(34,211,238,0.08);
+    --amber: #f59e0b;
+    --amber-dim: rgba(245,158,11,0.09);
+    --rose: #fb7185;
+    --rose-dim: rgba(251,113,133,0.08);
+    --violet: #a78bfa;
+    --violet-dim: rgba(167,139,250,0.08);
+    --green: #4ade80;
+    --green-dim: rgba(74,222,128,0.08);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f0f4f8;
+      --bg-grid: rgba(15,110,105,0.04);
+      --surface: #ffffff;
+      --surface2: #e8f0f5;
+      --surface3: #f5f9fc;
+      --surface-elevated: #ffffff;
+      --border: rgba(15,110,105,0.14);
+      --border-bright: rgba(15,110,105,0.28);
+      --text: #0a1a2a;
+      --text-dim: #4a6a7a;
+      --text-faint: #9ab0bb;
+      --teal: #0f766e;
+      --teal-dim: rgba(15,118,110,0.08);
+      --teal-glow: rgba(15,118,110,0.12);
+      --cyan: #0284c7;
+      --cyan-dim: rgba(2,132,199,0.07);
+      --amber: #b45309;
+      --amber-dim: rgba(180,83,9,0.08);
+      --rose: #be123c;
+      --rose-dim: rgba(190,18,60,0.07);
+      --violet: #7c3aed;
+      --violet-dim: rgba(124,58,237,0.07);
+      --green: #15803d;
+      --green-dim: rgba(21,128,61,0.07);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; }
+  }
+  @keyframes fadeUp   { from { opacity:0; transform: translateY(12px); } to { opacity:1; transform: translateY(0); } }
+  @keyframes fadeScale{ from { opacity:0; transform: scale(0.94); }      to { opacity:1; transform: scale(1); } }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(var(--bg-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px),
+      radial-gradient(ellipse at 15% 10%, rgba(94,234,212,0.04) 0%, transparent 40%),
+      radial-gradient(ellipse at 85% 85%, rgba(167,139,250,0.04) 0%, transparent 40%);
+    background-size: 24px 24px, 24px 24px, 100% 100%, 100% 100%;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.65;
+    padding: 48px 40px;
+    min-height: 100vh;
+    overflow-wrap: break-word;
+  }
+  .anim-up    { animation: fadeUp    0.45s ease-out both; animation-delay: calc(var(--i,0)*0.07s); }
+  .anim-scale { animation: fadeScale 0.4s  ease-out both; animation-delay: calc(var(--i,0)*0.07s); }
+  .page-wrap { max-width: 1060px; margin: 0 auto; }
+  h1 { font-size: clamp(28px,4.5vw,46px); font-weight: 700; letter-spacing: -1.2px; line-height: 1.1; margin-bottom: 8px; text-wrap: balance; }
+  h2 { font-size: 18px; font-weight: 600; margin-bottom: 0; letter-spacing: -0.3px; }
+  p  { font-size: 14px; line-height: 1.72; }
+  code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--teal-dim);
+    color: var(--teal);
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+  pre {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--surface3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    line-height: 1.7;
+    color: var(--text-dim);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  pre .kw { color: var(--violet); }
+  pre .ty { color: var(--cyan); }
+  pre .cm { color: var(--text-faint); }
+  pre .st { color: var(--green); }
+  pre .nu { color: var(--amber); }
+  pre .fn { color: var(--teal); }
+
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .section-label .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .teal-label  .dot { background: var(--teal);   } .teal-label  { color: var(--teal); }
+  .cyan-label  .dot { background: var(--cyan);   } .cyan-label  { color: var(--cyan); }
+  .amber-label .dot { background: var(--amber);  } .amber-label { color: var(--amber); }
+  .rose-label  .dot { background: var(--rose);   } .rose-label  { color: var(--rose); }
+  .violet-label.dot { background: var(--violet); } .violet-label{ color: var(--violet); }
+  .green-label .dot { background: var(--green);  } .green-label { color: var(--green); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    min-width: 0;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .card:hover { border-color: var(--border-bright); box-shadow: 0 4px 20px rgba(94,234,212,0.06); }
+  .card--teal   { border-color: rgba(94,234,212,0.18);  background: linear-gradient(135deg, var(--surface) 0%, rgba(94,234,212,0.03) 100%); }
+  .card--cyan   { border-color: rgba(34,211,238,0.18);  background: linear-gradient(135deg, var(--surface) 0%, rgba(34,211,238,0.03) 100%); }
+  .card--amber  { border-color: rgba(245,158,11,0.18);  background: linear-gradient(135deg, var(--surface) 0%, rgba(245,158,11,0.03) 100%); }
+  .card--rose   { border-color: rgba(251,113,133,0.18); background: linear-gradient(135deg, var(--surface) 0%, rgba(251,113,133,0.03) 100%); }
+  .card--violet { border-color: rgba(167,139,250,0.18); background: linear-gradient(135deg, var(--surface) 0%, rgba(167,139,250,0.03) 100%); }
+  .card--green  { border-color: rgba(74,222,128,0.18);  background: linear-gradient(135deg, var(--surface) 0%, rgba(74,222,128,0.03) 100%); }
+  .card--elevated { box-shadow: 0 2px 16px rgba(0,0,0,0.3); }
+
+  .grid { display: grid; gap: 16px; }
+  .grid--2  { grid-template-columns: 1fr 1fr; }
+  .grid--3  { grid-template-columns: 1fr 1fr 1fr; }
+  .grid--12 { grid-template-columns: 1fr 2fr; }
+  .grid--21 { grid-template-columns: 2fr 1fr; }
+
+  .tag {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    display: inline-block;
+    margin-bottom: 8px;
+  }
+  .tag--teal   { background: var(--teal-dim);   color: var(--teal);   border: 1px solid rgba(94,234,212,0.2); }
+  .tag--amber  { background: var(--amber-dim);  color: var(--amber);  border: 1px solid rgba(245,158,11,0.2); }
+  .tag--rose   { background: var(--rose-dim);   color: var(--rose);   border: 1px solid rgba(251,113,133,0.2); }
+  .tag--violet { background: var(--violet-dim); color: var(--violet); border: 1px solid rgba(167,139,250,0.2); }
+  .tag--cyan   { background: var(--cyan-dim);   color: var(--cyan);   border: 1px solid rgba(34,211,238,0.2); }
+  .tag--green  { background: var(--green-dim);  color: var(--green);  border: 1px solid rgba(74,222,128,0.2); }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 14px; }
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 16px;
+    text-align: center;
+  }
+  .kpi .val {
+    font-family: var(--font-mono);
+    font-size: 30px;
+    font-weight: 600;
+    line-height: 1;
+    margin-bottom: 5px;
+    letter-spacing: -1px;
+  }
+  .kpi .lbl {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+  }
+
+  ul.list { list-style: none; font-size: 13px; line-height: 1.85; }
+  ul.list li { padding-left: 14px; position: relative; }
+  ul.list li::before { content: '›'; position: absolute; left: 0; color: var(--text-faint); font-weight: 700; }
+
+  .callout {
+    border-left: 2px solid var(--teal);
+    background: var(--teal-dim);
+    padding: 10px 14px;
+    border-radius: 0 7px 7px 0;
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+  .callout strong { color: var(--teal); }
+  .callout--amber { border-color: var(--amber); background: var(--amber-dim); }
+  .callout--amber strong { color: var(--amber); }
+  .callout--rose  { border-color: var(--rose);  background: var(--rose-dim); }
+  .callout--rose  strong { color: var(--rose); }
+  .callout--violet{ border-color: var(--violet); background: var(--violet-dim); }
+  .callout--violet strong { color: var(--violet); }
+
+  .section-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 8px 0;
+  }
+
+  .mermaid-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 16px;
+    overflow: auto;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 300px;
+    cursor: grab;
+    position: relative;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .mermaid-wrap.is-panning { cursor: grabbing; user-select: none; }
+  .mermaid-wrap .mermaid { zoom: 1.2; }
+  .zoom-controls {
+    position: absolute;
+    top: 8px; right: 8px;
+    display: flex;
+    gap: 2px;
+    z-index: 10;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px;
+  }
+  .zoom-controls button {
+    width: 26px; height: 26px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .zoom-controls button:hover { background: var(--border); color: var(--text); }
+
+  .top-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 32px;
+  }
+  .top-nav a {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--teal);
+    text-decoration: none;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .top-nav a:hover { background: var(--teal-dim); border-color: var(--teal); }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--teal);
+    margin-bottom: 10px;
+  }
+  .subtitle { font-size: 15px; color: var(--text-dim); line-height: 1.6; max-width: 680px; margin-top: 10px; }
+
+  details { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  details > summary {
+    padding: 12px 16px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    background: var(--surface2);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.15s ease;
+    user-select: none;
+  }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: '›'; color: var(--teal); font-size: 16px; transition: transform 0.2s ease; }
+  details[open] > summary::before { transform: rotate(90deg); }
+  details > summary:hover { background: var(--surface); }
+  details > .details-body { padding: 16px; }
+  details > .details-body > *:not(:last-child) { margin-bottom: 12px; }
+
+  .file-pill {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--cyan);
+    background: var(--cyan-dim);
+    border: 1px solid rgba(34,211,238,0.18);
+    padding: 2px 8px;
+    border-radius: 4px;
+    display: inline-block;
+  }
+
+  .thread-bar {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .thread-segment {
+    flex: 1;
+    padding: 14px 16px;
+    border-right: 1px solid var(--border);
+    min-width: 0;
+  }
+  .thread-segment:last-child { border-right: none; }
+  .thread-segment .t-name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .thread-segment .t-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+
+  .flow-row {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .flow-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 10px 14px;
+    min-width: 110px;
+    flex-shrink: 0;
+    text-align: center;
+  }
+  .flow-box .f-step { font-family: var(--font-mono); font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px; }
+  .flow-box .f-name { font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+  .flow-box .f-note { font-size: 10px; color: var(--text-dim); line-height: 1.4; }
+  .flow-arrow { padding: 0 4px; color: var(--text-faint); font-size: 16px; flex-shrink: 0; }
+
+  @media (max-width: 768px) {
+    body { padding: 20px 14px; }
+    .grid--2, .grid--3, .grid--12, .grid--21 { grid-template-columns: 1fr; }
+    .thread-bar { flex-direction: column; }
+    .thread-segment { border-right: none; border-bottom: 1px solid var(--border); }
+    .thread-segment:last-child { border-bottom: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+  <!-- Nav -->
+  <div class="top-nav">
+    <a href="index.html">&larr; Overview</a>
+    <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-faint);letter-spacing:1px">TECHNICAL DEEP DIVE</span>
+  </div>
+
+  <!-- Hero -->
+  <div style="margin-bottom:40px" class="anim-up" style="--i:0">
+    <div class="eyebrow">Architecture &amp; Implementation</div>
+    <h1>Inside the Video Player</h1>
+    <p class="subtitle">A detailed walkthrough of how every subsystem works — threading, synchronization, the decode pipeline, HTTP streaming, and performance measurement. Written for someone who knows some programming but is new to multimedia systems.</p>
+  </div>
+
+  <!-- Thread model -->
+  <div style="margin-bottom:24px" class="anim-up" style="--i:1">
+    <div class="card card--teal card--elevated">
+      <div class="section-label teal-label"><span class="dot"></span> The Three-Thread Model</div>
+      <p style="margin-bottom:14px;font-size:13px;color:var(--text-dim)">Most simple programs run one thing at a time. A media player needs to do three completely different jobs simultaneously, without any one of them blocking the others. The solution: three OS threads running in parallel.</p>
+      <div class="thread-bar anim-up" style="--i:2">
+        <div class="thread-segment" style="background:var(--teal-dim)">
+          <div class="t-name" style="color:var(--teal)">Main Thread</div>
+          <div class="t-desc">Runs the SDL event loop. Handles keyboard/mouse input. Pulls decoded video frames from the queue and renders them to the GPU. Responsible for everything visible on screen.</div>
+        </div>
+        <div class="thread-segment" style="background:var(--cyan-dim)">
+          <div class="t-name" style="color:var(--cyan)">VideoDecoderWorker</div>
+          <div class="t-desc">Reads the container file (MP4, MKV, etc.), demultiplexes packets, sends video packets to the video decoder, and forwards audio packets to the AudioDecoderWorker. This is the "reader" of the file.</div>
+        </div>
+        <div class="thread-segment" style="background:var(--amber-dim)">
+          <div class="t-name" style="color:var(--amber)">AudioDecoderWorker</div>
+          <div class="t-desc">Receives raw audio packets from the VideoDecoderWorker queue. Decodes them, converts sample format and sample rate using libswresample, and pushes PCM audio data directly into SDL's audio queue for playback.</div>
+        </div>
+      </div>
+      <div class="callout" style="margin-top:14px">
+        <strong>Why three threads?</strong> Without separate threads, decoding one slow frame would cause the audio to stutter. Separating concerns means video decoding, audio decoding, and rendering each advance at their own pace — connected only through shared queues.
+      </div>
+    </div>
+  </div>
+
+  <!-- Queues and sync -->
+  <div class="grid grid--2" style="margin-bottom:24px">
+    <div class="card card--cyan anim-up" style="--i:3">
+      <div class="section-label cyan-label"><span class="dot"></span> Bounded Packet Queues</div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Threads communicate through queues — like a conveyor belt between workers. Both queues are <em>bounded</em>: they hold a fixed maximum number of items. When a queue is full, the producer thread <em>blocks</em> (waits) instead of filling up all your RAM.</p>
+      <ul class="list" style="font-size:12px">
+        <li>Video frame queue: decoded frames waiting to be rendered by the main thread</li>
+        <li>Audio packet queue: compressed audio packets waiting to be decoded by AudioDecoderWorker</li>
+        <li>Blocking prevents unbounded memory growth if decoding outruns rendering</li>
+        <li>Implemented with <code>std::mutex</code> + <code>std::condition_variable</code> (C++ standard library)</li>
+      </ul>
+    </div>
+    <div class="card card--rose anim-up" style="--i:4">
+      <div class="section-label rose-label"><span class="dot"></span> PlaybackPause — Shared Atomic Gate</div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">When you drag or resize the SDL window, the OS can steal time from the render thread. If video and audio threads keep running, frames pile up and audio gets ahead. <code>PlaybackPause</code> pauses all threads simultaneously.</p>
+      <ul class="list" style="font-size:12px">
+        <li>Implemented as an <code>std::atomic&lt;bool&gt;</code> shared across all three threads</li>
+        <li>Atomics are thread-safe without a mutex — any thread can read/write simultaneously</li>
+        <li>All threads spin-check the flag before each unit of work, then yield if paused</li>
+        <li>Prevents audio "galloping ahead" of video during window moves</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Audio master clock -->
+  <div style="margin-bottom:24px" class="anim-up" style="--i:5">
+    <div class="card card--amber card--elevated">
+      <div class="section-label amber-label"><span class="dot"></span> Audio as the Master Clock — Why Audio Wins</div>
+      <div class="grid grid--2">
+        <div>
+          <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">Video and audio are separate streams in a container file. After decoding they need to stay in sync — if video runs fast, you see frames from the future while hearing the past (lip-sync problems). The industry-standard solution: make audio the master clock and let video chase it.</p>
+          <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">Audio output is driven by hardware — the sound card requests samples at a fixed rate. This rate is extremely stable, making the audio playback position the most reliable clock in the system. Video rendering is flexible (you can drop a frame), so video waits for audio.</p>
+          <div class="callout callout--amber">
+            <strong>The sync rule:</strong> Before rendering a frame, check if <code>target_seconds &lt;= audio_playback_seconds + 0.005</code>. If audio hasn't caught up yet, sleep briefly and check again. If the frame is more than 250 ms behind audio, drop it — it's stale.
+          </div>
+        </div>
+        <div>
+          <div class="section-label amber-label" style="margin-bottom:8px"><span class="dot"></span> Sync Logic (pseudocode)</div>
+          <pre><span class="cm">// In the main render loop, for each video frame:</span>
+<span class="kw">double</span> target = frame_seconds(frame);
+<span class="kw">double</span> audio  = audio_output.playback_seconds();
+
+<span class="kw">if</span> (target + <span class="nu">0.250</span> &lt; audio) {
+    <span class="cm">// Frame is 250ms behind — drop it</span>
+    <span class="fn">drop_frame</span>();
+    <span class="kw">continue</span>;
+}
+
+<span class="kw">while</span> (target &gt; audio + <span class="nu">0.005</span>) {
+    <span class="cm">// Too early — wait for audio to catch up</span>
+    <span class="fn">SDL_Delay</span>(<span class="nu">1</span>);
+    audio = audio_output.<span class="fn">playback_seconds</span>();
+}
+
+<span class="cm">// Audio has caught up — render this frame</span>
+video_output.<span class="fn">render_frame</span>(frame);</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Decode pipeline deep -->
+  <div style="margin-bottom:24px" class="anim-up" style="--i:6">
+    <div class="card card--violet">
+      <div class="section-label violet-label"><span class="dot"></span> The Decode Pipeline in Detail</div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Each video file is actually a container — a wrapper holding one or more independent streams of compressed data. Getting a frame onto the screen requires passing through multiple layers of FFmpeg and SDL APIs.</p>
+      <div class="flow-row" style="margin-bottom:14px">
+        <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
+          <div class="f-step" style="color:var(--violet)">1</div>
+          <div class="f-name">Open Input</div>
+          <div class="f-note">avformat_open_input reads the container header. Identifies format (MP4, MKV, RTSP) and streams inside it.</div>
+        </div>
+        <div class="flow-arrow">›</div>
+        <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
+          <div class="f-step" style="color:var(--violet)">2</div>
+          <div class="f-name">Find Streams</div>
+          <div class="f-note">avformat_find_stream_info probes the file to identify which streams are video and which are audio.</div>
+        </div>
+        <div class="flow-arrow">›</div>
+        <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
+          <div class="f-step" style="color:var(--violet)">3</div>
+          <div class="f-name">Demux</div>
+          <div class="f-note">av_read_frame extracts one packet at a time. Routes video packets to video decoder; audio packets to audio queue.</div>
+        </div>
+        <div class="flow-arrow">›</div>
+        <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
+          <div class="f-step" style="color:var(--violet)">4</div>
+          <div class="f-name">Decode</div>
+          <div class="f-note">avcodec_send_packet + avcodec_receive_frame expand compressed data into raw pixel/sample data.</div>
+        </div>
+        <div class="flow-arrow">›</div>
+        <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
+          <div class="f-step" style="color:var(--violet)">5</div>
+          <div class="f-name">Convert</div>
+          <div class="f-note">YUV420P fast path: SDL_UpdateYUVTexture. Other formats: libswscale converts to RGBA before upload.</div>
+        </div>
+        <div class="flow-arrow">›</div>
+        <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
+          <div class="f-step" style="color:var(--violet)">6</div>
+          <div class="f-name">Render</div>
+          <div class="f-note">SDL_RenderCopy scales the GPU texture into the letterboxed destination rect on screen.</div>
+        </div>
+      </div>
+      <div class="grid grid--2">
+        <details>
+          <summary>What is a container vs. a codec?</summary>
+          <div class="details-body">
+            <p style="font-size:13px;color:var(--text-dim)">Think of a container (.mp4, .mkv) as an envelope. It holds the actual compressed data plus metadata (timecodes, chapter markers, subtitle tracks). The codec (H.264, VP9, AV1, AAC) is the specific compression algorithm used to shrink the raw data. You can have H.264 video inside either an MP4 or an MKV container — the envelope and the compression are independent.</p>
+          </div>
+        </details>
+        <details>
+          <summary>What is YUV420P and why is it a "fast path"?</summary>
+          <div class="details-body">
+            <p style="font-size:13px;color:var(--text-dim)">YUV420P is how most video codecs (H.264, H.265) store decoded frames: brightness (Y) at full resolution, color (U and V channels) at half resolution. SDL has a native call <code>SDL_UpdateYUVTexture</code> that accepts YUV420P directly — the GPU can display it without conversion. For other pixel formats, libswscale must first convert to RGBA, which costs extra CPU time every frame.</p>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- RAII wrappers -->
+  <div style="margin-bottom:24px" class="anim-up" style="--i:7">
+    <div class="card card--teal">
+      <div class="section-label teal-label"><span class="dot"></span> RAII Wrappers — Memory Safety Around C APIs</div>
+      <div class="grid grid--2">
+        <div>
+          <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">FFmpeg is a C library — it doesn't manage memory for you. Every <code>avcodec_open2</code> needs a matching <code>avcodec_free_context</code>, and if your program exits early (an error, a thrown exception), leaked memory means crashes or resource exhaustion.</p>
+          <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">The file <span class="file-pill">src/player/av_support.hpp</span> defines custom RAII (Resource Acquisition Is Initialization) smart pointer types for every FFmpeg handle. They wrap C pointers in C++ destructors so cleanup is automatic and exception-safe.</p>
+          <div class="callout">
+            <strong>RAII principle:</strong> Acquire a resource when you construct an object; release it when the object is destroyed. The destructor runs even if an exception throws, so you can never forget to clean up.
+          </div>
+        </div>
+        <div>
+          <pre><span class="cm">// Defined in av_support.hpp:</span>
+<span class="kw">using</span> <span class="ty">FormatPtr</span> = std::unique_ptr&lt;
+    <span class="ty">AVFormatContext</span>,
+    <span class="ty">FormatDeleter</span>  <span class="cm">// calls avformat_close_input</span>
+&gt;;
+
+<span class="kw">using</span> <span class="ty">CodecContextPtr</span> = std::unique_ptr&lt;
+    <span class="ty">AVCodecContext</span>,
+    <span class="ty">CodecContextDeleter</span>  <span class="cm">// calls avcodec_free_context</span>
+&gt;;
+
+<span class="kw">using</span> <span class="ty">FramePtr</span> = std::unique_ptr&lt;
+    <span class="ty">AVFrame</span>,
+    <span class="ty">FrameDeleter</span>  <span class="cm">// calls av_frame_free</span>
+&gt;;
+
+<span class="cm">// Usage — no manual cleanup needed:</span>
+<span class="ty">FormatPtr</span> fmt = <span class="fn">open_input</span>(url);
+<span class="cm">// fmt automatically freed when it goes out of scope</span></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SDL subsystems -->
+  <div class="grid grid--2" style="margin-bottom:24px">
+    <div class="card card--green anim-up" style="--i:8">
+      <div class="section-label green-label"><span class="dot"></span> AudioOutput &mdash; How Sound Gets Played</div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">Defined in <span class="file-pill">src/player/sdl_media.hpp</span>. SDL2's audio system works by calling a callback function whenever the sound card needs more samples. AudioOutput converts decoded audio into the sample format SDL expects using libswresample, then pushes it into SDL's internal audio queue.</p>
+      <ul class="list" style="font-size:12px">
+        <li>Target audio buffer size: 150 ms (tunable via <code>WEBVIDEOPLAYBACK_AUDIO_LATENCY_MS</code> env var)</li>
+        <li>Conversion pipeline: FFmpeg AVFrame &rarr; libswresample &rarr; float32 stereo &rarr; SDL queue</li>
+        <li><code>playback_seconds()</code> returns a running estimate of how much audio has been consumed by the hardware</li>
+        <li>This estimate is the master clock that video synchronizes against</li>
+        <li>Higher latency = more stable audio (fewer underruns) but more sync lag</li>
+      </ul>
+    </div>
+    <div class="card card--cyan anim-up" style="--i:9">
+      <div class="section-label cyan-label"><span class="dot"></span> VideoOutput &mdash; Letterboxing and GPU Rendering</div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">Handles window creation, GPU texture management, and letterboxing — the black bars you see when a video's aspect ratio doesn't match the window. The calculation computes a <code>video_destination_rect</code> that preserves the video's original proportions.</p>
+      <ul class="list" style="font-size:12px">
+        <li>SDL_Renderer uses the GPU for texture scaling &mdash; no CPU-side pixel scaling</li>
+        <li>YUV420P fast path: calls <code>SDL_UpdateYUVTexture</code> (three-plane Y/U/V upload)</li>
+        <li>Other pixel formats: libswscale converts to RGBA first, then <code>SDL_UpdateTexture</code></li>
+        <li>Letterbox bars cleared to black each frame before rendering the video rect</li>
+        <li><code>F1</code> key toggles debug overlay drawn with a custom bitmap font glyph table</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Debug overlay + perf report -->
+  <div class="grid grid--12" style="margin-bottom:24px">
+    <div class="card card--rose anim-up" style="--i:10">
+      <div class="section-label rose-label"><span class="dot"></span> F1 Debug Overlay</div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">Press <code>F1</code> to show a real-time stats panel rendered directly on top of the video. The overlay is drawn using a hardcoded bitmap font &mdash; a table of 8&times;8 pixel glyphs for every printable ASCII character. This avoids any font library dependency for the HUD.</p>
+      <ul class="list" style="font-size:12px">
+        <li>Renders: FPS, frame decode time (ms), GPU upload time, render time, audio clock drift</li>
+        <li>Memory stats: SDL texture VRAM estimate, decoded frame queue depth</li>
+        <li>Pixel-drawn using <code>SDL_RenderDrawPoint</code> &mdash; no texture atlas or font library needed</li>
+      </ul>
+    </div>
+    <div class="card card--amber anim-up" style="--i:11">
+      <div class="section-label amber-label"><span class="dot"></span> Performance CSV Reports</div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">Pass <code>--performance-report</code> on startup to record per-frame timing to a CSV file in the <code>reports/</code> directory. Every frame writes one row.</p>
+      <ul class="list" style="font-size:12px">
+        <li>Columns: frame number, pts (seconds), demux_ms, decode_ms, swscale_ms, upload_ms, render_ms, audio_drift_ms</li>
+        <li>Use any spreadsheet or Python pandas to plot and analyze bottlenecks</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- HTTP test server -->
+  <div style="margin-bottom:24px" class="anim-up" style="--i:12">
+    <div class="card card--violet card--elevated">
+      <div class="section-label violet-label"><span class="dot"></span> The HTTP Test Server — How Streaming Works</div>
+      <div class="grid grid--21">
+        <div>
+          <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Real streaming services (YouTube, Netflix) don't send you the entire video file before you can watch it. They send it piece by piece using HTTP byte-range requests &mdash; your player asks "give me bytes 1,000,000 to 2,000,000", downloads that chunk, plays it, then asks for the next chunk. This lets you seek to any position without re-downloading the whole file.</p>
+          <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">The test server in this project implements exactly this. It serves files from disk over HTTP and understands the <code>Range: bytes=X-Y</code> header. FFmpeg's networking layer sends range requests automatically when it opens an HTTP URL, so the player streams seamlessly over the local network.</p>
+          <div class="callout callout--violet">
+            <strong>Security note:</strong> <code>resolve_request_path()</code> blocks path traversal attacks (<code>/../</code> sequences in URLs). It normalizes the path and verifies the resolved file is inside the configured root directory before opening it.
+          </div>
+        </div>
+        <div>
+          <div class="section-label violet-label" style="margin-bottom:8px"><span class="dot"></span> Server Threading</div>
+          <div class="thread-bar" style="flex-direction:column">
+            <div class="thread-segment" style="background:var(--violet-dim)">
+              <div class="t-name" style="color:var(--violet)">Accept Loop Thread</div>
+              <div class="t-desc">Blocks on <code>accept()</code> waiting for new TCP connections. Spawns a new <code>handle_client</code> thread for each connection.</div>
+            </div>
+            <div class="thread-segment" style="background:var(--violet-dim)">
+              <div class="t-name" style="color:var(--violet)">handle_client Threads</div>
+              <div class="t-desc">One thread per connection. Parses the HTTP request, resolves the path, calls <code>send_file()</code> with byte ranges, closes socket when done.</div>
+            </div>
+            <div class="thread-segment" style="background:var(--violet-dim)">
+              <div class="t-name" style="color:var(--violet)">Dashboard Refresh Thread</div>
+              <div class="t-desc">Wakes every 100 ms, updates FTXUI component state with latest transfer stats, triggers a screen re-draw.</div>
+            </div>
+            <div class="thread-segment" style="background:var(--violet-dim)">
+              <div class="t-name" style="color:var(--violet)">FTXUI Event Loop</div>
+              <div class="t-desc">Runs the terminal UI event loop. Handles keyboard input (Q to quit). Draws the transfer progress table using FTXUI components.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mermaid: threading sequence -->
+  <div style="margin-bottom:24px" class="anim-up" style="--i:13">
+    <div class="card">
+      <div class="section-label teal-label"><span class="dot"></span> Startup Sequence Diagram</div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:14px">What happens from the moment you run the player until the first frame appears on screen.</p>
+      <div class="mermaid-wrap">
+        <div class="zoom-controls">
+          <button onclick="zoomDiagram(this,1.2)">+</button>
+          <button onclick="zoomDiagram(this,0.8)">&minus;</button>
+          <button onclick="resetZoom(this)">&#8634;</button>
+        </div>
+        <pre class="mermaid">
+sequenceDiagram
+  participant User
+  participant Main as Main Thread
+  participant SDL as SDL2
+  participant VD as VideoDecoder Thread
+  participant AD as AudioDecoder Thread
+  participant FF as FFmpeg
+
+  User->>Main: run_player(argc, argv)
+  Main->>SDL: SDL_Init (video + audio)
+  Main->>FF: open_input(url or path)
+  FF-->>Main: FormatContext + stream info
+  Main->>FF: open_decoder (video stream)
+  Main->>FF: open_decoder (audio stream)
+  Main->>SDL: Create window + renderer + texture
+  Main->>AD: Start AudioDecoderWorker thread
+  Main->>VD: Start VideoDecoderWorker thread
+
+  VD->>FF: av_read_frame (demux loop)
+  FF-->>VD: video packet
+  VD->>FF: avcodec_send_packet
+  FF-->>VD: AVFrame (decoded video)
+  VD->>Main: push frame to video queue
+  VD-->>AD: push audio packet to audio queue
+  AD->>FF: avcodec_send_packet
+  FF-->>AD: AVFrame (decoded audio)
+  AD->>SDL: SDL_QueueAudio (PCM samples)
+  SDL-->>AD: audio playback started
+
+  Main->>Main: pop frame from queue
+  Main->>Main: wait for audio clock sync
+  Main->>SDL: SDL_UpdateYUVTexture (GPU upload)
+  Main->>SDL: SDL_RenderCopy (draw to window)
+  SDL-->>User: First frame visible
+        </pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- File map -->
+  <div style="margin-bottom:24px" class="anim-up" style="--i:14">
+    <div class="card">
+      <div class="section-label teal-label"><span class="dot"></span> Source File Map</div>
+      <div class="grid grid--2">
+        <div>
+          <div class="tag tag--teal" style="margin-bottom:10px">Player</div>
+          <ul class="list" style="font-size:12px">
+            <li><span class="file-pill">src/main.cpp</span> — entry point; SDL.h must be here, delegates to run_player</li>
+            <li><span class="file-pill">src/player/player.hpp</span> — declares <code>run_player()</code></li>
+            <li><span class="file-pill">src/player/player.cpp</span> — core playback loop, all three worker classes, sync logic, PerformanceReport</li>
+            <li><span class="file-pill">src/player/av_support.hpp</span> — FFmpeg RAII wrappers, open_input, open_decoder, frame_seconds, stream_fps</li>
+            <li><span class="file-pill">src/player/sdl_media.hpp</span> — AudioOutput, VideoOutput, DebugStats, debug overlay, Windows file picker</li>
+          </ul>
+        </div>
+        <div>
+          <div class="tag tag--violet" style="margin-bottom:10px">Test Server</div>
+          <ul class="list" style="font-size:12px">
+            <li><span class="file-pill">src/server/server.hpp</span> — declares <code>run_server()</code></li>
+            <li><span class="file-pill">src/server/server.cpp</span> — HTTP accept loop, handle_client, send_file, parse_range, FTXUI dashboard, ServerConfig</li>
+            <li><span class="file-pill">src/server/network.hpp</span> — WinsockGuard, RAII Socket, send_all, create_listener (Windows-only)</li>
+          </ul>
+          <div class="tag tag--amber" style="margin-top:14px;margin-bottom:10px">Build</div>
+          <ul class="list" style="font-size:12px">
+            <li><span class="file-pill">CMakeLists.txt</span> — two targets, C++20, vcpkg, links SDL2/FFmpeg/ftxui/ws2_32/comdlg32/psapi</li>
+            <li><span class="file-pill">vcpkg.json</span> — declares all four library dependencies for vcpkg to download</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Key design decisions -->
+  <div style="margin-bottom:24px" class="anim-up" style="--i:15">
+    <div class="card card--green">
+      <div class="section-label green-label"><span class="dot"></span> Key Design Decisions and Why</div>
+      <div class="grid grid--2">
+        <div>
+          <div class="callout" style="margin-bottom:10px">
+            <strong>Audio latency env var instead of a flag</strong><br>
+            <span style="font-size:12px">Audio buffer tuning is system-specific (some machines need bigger buffers to avoid pops). An environment variable lets you set it once for your machine without changing command lines or rebuilding.</span>
+          </div>
+          <div class="callout callout--amber" style="margin-bottom:10px">
+            <strong>WIN32 subsystem flag on the player</strong><br>
+            <span style="font-size:12px">CMakeLists sets <code>WIN32</code> for the player target. This starts the process without a console window (no black box behind the video). SDL's preprocessor macro translates <code>main</code> into the Windows <code>WinMain</code> entry point automatically.</span>
+          </div>
+          <div class="callout callout--rose">
+            <strong>Per-connection threads in the server</strong><br>
+            <span style="font-size:12px">The test server spawns one OS thread per incoming connection. Simple to reason about, no async complexity. Fine for a dev-only tool where concurrency stays low. Not appropriate for production (too many threads under load).</span>
+          </div>
+        </div>
+        <div>
+          <div class="callout callout--violet" style="margin-bottom:10px">
+            <strong>Custom bitmap font for the debug overlay</strong><br>
+            <span style="font-size:12px">Using a real font library for an optional 8×8 debug HUD would add a significant dependency. A hand-coded glyph table (an array of uint8_t bitmasks per character) is self-contained, always available, and renders at exactly one pixel per bit.</span>
+          </div>
+          <div class="callout" style="margin-bottom:10px">
+            <strong>250ms stale-frame threshold</strong><br>
+            <span style="font-size:12px">If video decoding stalls and then catches up, old frames would flash briefly before syncing. Dropping frames older than 250 ms relative to audio ensures the visual experience stays smooth even after a decoder hiccup.</span>
+          </div>
+          <div class="callout callout--amber">
+            <strong>Reports directory set at compile time</strong><br>
+            <span style="font-size:12px">CMake defines <code>WEBVIDEOPLAYBACK_REPORT_DIR</code> as an absolute path at build time. This means performance CSVs always land in the source tree's <code>reports/</code> folder, making them easy to find for analysis regardless of where you launch the binary from.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer nav -->
+  <div style="text-align:center;padding:16px 0 0" class="anim-up" style="--i:16">
+    <a href="index.html"
+       style="display:inline-block;font-family:var(--font-mono);font-size:12px;color:var(--teal);text-decoration:none;padding:9px 22px;border:1px solid var(--border);border-radius:7px;transition:background 0.15s ease,border-color 0.15s ease;"
+       onmouseover="this.style.background='var(--teal-dim)';this.style.borderColor='var(--teal)'"
+       onmouseout="this.style.background='';this.style.borderColor='var(--border)'">
+      &larr; Back to Overview
+    </a>
+  </div>
+
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  const isLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    look: 'classic',
+    themeVariables: {
+      primaryColor:         isLight ? '#e0f7f5' : '#0d2a27',
+      primaryBorderColor:   isLight ? '#0f766e' : '#5eead4',
+      primaryTextColor:     isLight ? '#0a1a2a' : '#d4e8f0',
+      secondaryColor:       isLight ? '#fef9e6' : '#1a1500',
+      secondaryBorderColor: isLight ? '#b45309' : '#f59e0b',
+      secondaryTextColor:   isLight ? '#0a1a2a' : '#d4e8f0',
+      tertiaryColor:        isLight ? '#f0eaff' : '#180f2a',
+      tertiaryBorderColor:  isLight ? '#7c3aed' : '#a78bfa',
+      tertiaryTextColor:    isLight ? '#0a1a2a' : '#d4e8f0',
+      lineColor:            isLight ? '#6b8899' : '#3d5566',
+      activationBorderColor:isLight ? '#0f766e' : '#5eead4',
+      activationBkgColor:   isLight ? '#e0f7f5' : '#0d2a27',
+      actorBkg:             isLight ? '#f0f4f8' : '#131b23',
+      actorBorder:          isLight ? '#0f766e' : '#5eead4',
+      actorTextColor:       isLight ? '#0a1a2a' : '#d4e8f0',
+      actorLineColor:       isLight ? '#6b8899' : '#3d5566',
+      noteBkgColor:         isLight ? '#fef9e6' : '#1a1500',
+      noteBorderColor:      isLight ? '#b45309' : '#f59e0b',
+      noteTextColor:        isLight ? '#0a1a2a' : '#d4e8f0',
+      labelBoxBkgColor:     isLight ? '#e0f7f5' : '#0d2a27',
+      labelBoxBorderColor:  isLight ? '#0f766e' : '#5eead4',
+      labelTextColor:       isLight ? '#0a1a2a' : '#d4e8f0',
+      loopTextColor:        isLight ? '#0a1a2a' : '#d4e8f0',
+      signalColor:          isLight ? '#0f766e' : '#5eead4',
+      signalTextColor:      isLight ? '#0a1a2a' : '#d4e8f0',
+      fontSize: '14px',
+      fontFamily: "'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif",
+    }
+  });
+</script>
+<script>
+  var INITIAL_ZOOM = 1.2;
+  function zoomDiagram(btn, factor) {
+    var wrap = btn.closest('.mermaid-wrap');
+    var target = wrap.querySelector('.mermaid');
+    var current = parseFloat(target.dataset.zoom || INITIAL_ZOOM);
+    var next = Math.min(Math.max(current * factor, 0.5), 5);
+    target.dataset.zoom = next;
+    target.style.zoom = next;
+  }
+  function resetZoom(btn) {
+    var wrap = btn.closest('.mermaid-wrap');
+    var target = wrap.querySelector('.mermaid');
+    target.dataset.zoom = INITIAL_ZOOM;
+    target.style.zoom = INITIAL_ZOOM;
+  }
+  document.querySelectorAll('.mermaid-wrap').forEach(function(wrap) {
+    wrap.addEventListener('wheel', function(e) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      var target = wrap.querySelector('.mermaid');
+      var current = parseFloat(target.dataset.zoom || INITIAL_ZOOM);
+      var factor = e.deltaY < 0 ? 1.1 : 0.9;
+      var next = Math.min(Math.max(current * factor, 0.5), 5);
+      target.dataset.zoom = next;
+      target.style.zoom = next;
+    }, { passive: false });
+    var startX, startY, scrollL, scrollT;
+    wrap.addEventListener('mousedown', function(e) {
+      if (e.target.closest('.zoom-controls')) return;
+      wrap.classList.add('is-panning');
+      startX = e.clientX; startY = e.clientY;
+      scrollL = wrap.scrollLeft; scrollT = wrap.scrollTop;
+    });
+    window.addEventListener('mousemove', function(e) {
+      if (!wrap.classList.contains('is-panning')) return;
+      wrap.scrollLeft = scrollL - (e.clientX - startX);
+      wrap.scrollTop = scrollT - (e.clientY - startY);
+    });
+    window.addEventListener('mouseup', function() {
+      wrap.classList.remove('is-panning');
+    });
+  });
+</script>
+</body>
+</html>

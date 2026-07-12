@@ -13,9 +13,13 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(webvideoplayback WIN32
     src/main.cpp
+    src/common/string_utils.cpp
+    src/player/av_support.cpp
+    src/player/player.cpp
 )
 
 target_include_directories(webvideoplayback PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
     ${FFMPEG_INCLUDE_DIRS}
 )
 
@@ -38,6 +42,13 @@ if(WIN32)
 
     add_executable(webvideoplayback_test_server
         src/test_video_server.cpp
+        src/common/string_utils.cpp
+        src/server/network.cpp
+        src/server/server.cpp
+    )
+
+    target_include_directories(webvideoplayback_test_server PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
     )
 
     target_link_libraries(webvideoplayback_test_server PRIVATE ws2_32)

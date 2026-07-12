@@ -2,12 +2,18 @@
 
 C++ and SDL2 application scaffold for local web media playback.
 
+## Architecture Docs
+
+- [Native Decoder Backend Plan](docs/native-decoder-backend-plan.md)
+
 ## Dependencies
 
 This project uses CMake and vcpkg manifest mode.
 
 - SDL2 handles the window, rendering, and audio output.
 - FFmpeg handles container demuxing and audio/video decoding.
+- FTXUI renders the test server console dashboard.
+- nlohmann-json parses the test server config file.
 
 ## Build
 
@@ -31,6 +37,9 @@ Pass a URL or file path to skip the file picker.
 
 Press `F1` to toggle the debug overlay.
 Performance CSV files are written to `reports/`.
+CSV reporting is off by default.
+Enable it with `--performance-report`.
+`--perf-report` also works.
 Set `WEBVIDEOPLAYBACK_AUDIO_LATENCY_MS` to tune queued audio.
 The default target is `150`.
 
@@ -65,7 +74,7 @@ http://127.0.0.1:8080/sample.mp4
 
 Press `Q` in the server terminal to stop it.
 
-For the Real Genius test file, run:
+For configured local videos, run:
 
 ```powershell
 .\scripts\serve-videos.ps1
@@ -77,10 +86,27 @@ Then play it from the test server:
 .\scripts\play-real-genius-stream.ps1
 ```
 
+Or play The Last Starfighter:
+
+```powershell
+.\scripts\play-starfighter.ps1
+```
+
 The Real Genius route is:
 
 ```text
 http://127.0.0.1:8080/real-genius.mp4
 ```
 
+The Last Starfighter route is:
+
+```text
+http://127.0.0.1:8080/the-last-starfighter.mp4
+```
+
 Seeking, subtitles, playlists, and hardware decoding are natural next steps.
+
+## Note about assets
+
+I have local copies of the Real Genius and The Last StarFighter videos.
+They are not included in this repository as they are copyrighted.
