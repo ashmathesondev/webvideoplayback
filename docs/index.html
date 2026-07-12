@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Web Video Playback System</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172026;
+      --muted: #5f6b73;
+      --line: #cfd8dd;
+      --paper: #f7f9fb;
+      --panel: #ffffff;
+      --accent: #0f766e;
+      --accent-2: #b45309;
+      --accent-3: #1d4ed8;
+      --bad: #b91c1c;
+      --good: #15803d;
+      --shadow: 0 18px 45px rgba(23, 32, 38, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Segoe UI", Arial, sans-serif;
+      line-height: 1.45;
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 12px 22px;
+      background: rgba(247, 249, 251, 0.96);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(8px);
+    }
+
+    nav strong {
+      white-space: nowrap;
+      font-size: 15px;
+    }
+
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+    }
+
+    nav a:hover {
+      color: var(--ink);
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 26px 20px 60px;
+    }
+
+    section {
+      min-height: calc(100vh - 80px);
+      padding: 42px 0 54px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      max-width: 980px;
+      font-size: clamp(42px, 7vw, 84px);
+      font-weight: 760;
+    }
+
+    h2 {
+      margin-bottom: 20px;
+      font-size: clamp(30px, 4vw, 52px);
+      font-weight: 740;
+    }
+
+    h3 {
+      margin-bottom: 10px;
+      font-size: 18px;
+    }
+
+    p {
+      max-width: 840px;
+      margin: 12px 0;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    ul {
+      margin: 12px 0 0;
+      padding-left: 22px;
+    }
+
+    li {
+      margin: 8px 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: #eef3f5;
+      color: #15252d;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 14px 0 0;
+      padding: 16px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #102027;
+      color: #e7f0f2;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .lead {
+      margin-top: 24px;
+      max-width: 920px;
+      color: #34414a;
+      font-size: 22px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 16px;
+      margin-top: 24px;
+    }
+
+    .span-3 {
+      grid-column: span 3;
+    }
+
+    .span-4 {
+      grid-column: span 4;
+    }
+
+    .span-5 {
+      grid-column: span 5;
+    }
+
+    .span-6 {
+      grid-column: span 6;
+    }
+
+    .span-7 {
+      grid-column: span 7;
+    }
+
+    .span-12 {
+      grid-column: span 12;
+    }
+
+    .card {
+      min-height: 100%;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .quiet {
+      box-shadow: none;
+    }
+
+    .kpi {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .kpi b {
+      font-size: 28px;
+    }
+
+    .kpi span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      align-items: stretch;
+      margin-top: 18px;
+    }
+
+    .step {
+      position: relative;
+      min-height: 132px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .step:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -9px;
+      width: 8px;
+      height: 2px;
+      background: var(--accent);
+    }
+
+    .step b {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--accent);
+      font-size: 14px;
+      text-transform: uppercase;
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .diagram {
+      display: grid;
+      grid-template-columns: 1fr 120px 1fr;
+      gap: 18px;
+      align-items: center;
+      margin-top: 24px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .box {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .box strong {
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .box small {
+      color: var(--muted);
+    }
+
+    .wire {
+      display: grid;
+      gap: 12px;
+      color: var(--accent);
+      text-align: center;
+      font-weight: 700;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #eef7f6;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .two-col {
+      columns: 2;
+      column-gap: 28px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .timeline-row {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 18px;
+      align-items: start;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .timeline-row b {
+      color: var(--accent-3);
+    }
+
+    .warning {
+      border-color: #f1c27d;
+      background: #fff8ed;
+    }
+
+    .success {
+      border-color: #9bd3a8;
+      background: #f0fbf2;
+    }
+
+    .mono-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+      font-size: 14px;
+    }
+
+    .mono-table th,
+    .mono-table td {
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .mono-table th {
+      color: var(--ink);
+    }
+
+    .mono-table td {
+      color: var(--muted);
+    }
+
+    .footer-note {
+      margin-top: 26px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    @media (max-width: 900px) {
+      nav {
+        overflow-x: auto;
+      }
+
+      section {
+        min-height: auto;
+      }
+
+      .span-3,
+      .span-4,
+      .span-5,
+      .span-6,
+      .span-7 {
+        grid-column: span 12;
+      }
+
+      .flow,
+      .diagram {
+        grid-template-columns: 1fr;
+      }
+
+      .step::after {
+        display: none;
+      }
+
+      .two-col {
+        columns: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <strong>Web Video Playback</strong>
+    <a href="#overview">Overview</a>
+    <a href="#client">Client</a>
+    <a href="#server">Server</a>
+    <a href="#streaming">Streaming</a>
+    <a href="#timing">Timing</a>
+    <a href="#operations">Operations</a>
+    <a href="#support">Support</a>
+  </nav>
+
+  <main>
+    <section id="overview">
+      <h1>Web Video Playback System</h1>
+      <p class="lead">An SDL and FFmpeg playback client paired with a loopback HTTP range server for repeatable streaming tests.</p>
+      <div class="grid">
+        <div class="card span-3 kpi">
+          <b>2</b>
+          <span>Executables: player and test server.</span>
+        </div>
+        <div class="card span-3 kpi">
+          <b>HTTP Range</b>
+          <span>Server supports seekable media reads.</span>
+        </div>
+        <div class="card span-3 kpi">
+          <b>Audio Clock</b>
+          <span>Playback timing follows queued audio.</span>
+        </div>
+        <div class="card span-3 kpi">
+          <b>FTXUI</b>
+          <span>Server dashboard tracks active transfers.</span>
+        </div>
+      </div>
+
+      <div class="diagram">
+        <div class="stack">
+          <div class="box"><strong>Playback Client</strong><small>SDL window, FFmpeg decode, audio clock, renderer.</small></div>
+          <div class="box"><strong>Worker Threads</strong><small>Demux, video decode, audio decode.</small></div>
+          <div class="box"><strong>Reports</strong><small>Optional CSV timing when enabled.</small></div>
+        </div>
+        <div class="wire">
+          <span>GET</span>
+          <span>Range</span>
+          <span>206</span>
+        </div>
+        <div class="stack">
+          <div class="box"><strong>Test Server</strong><small>Loopback HTTP, route allowlist, byte serving.</small></div>
+          <div class="box"><strong>Config</strong><small>JSON file lists routes and file paths.</small></div>
+          <div class="box"><strong>Dashboard</strong><small>Active streams, counters, recent events.</small></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture">
+      <h2>Repository Architecture</h2>
+      <p>The codebase is split around ownership boundaries. The client owns playback policy. The server owns HTTP and transfer state. Shared helpers stay in common modules.</p>
+      <table class="mono-table">
+        <thead>
+          <tr><th>Path</th><th>Responsibility</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>src/main.cpp</code></td><td>Small SDL-aware player entrypoint.</td></tr>
+          <tr><td><code>src/player/player.cpp</code></td><td>Playback orchestration, worker lifetime, pause policy, report flag.</td></tr>
+          <tr><td><code>src/player/av_support.*</code></td><td>FFmpeg RAII wrappers, decoder setup, timestamp helpers.</td></tr>
+          <tr><td><code>src/player/sdl_media.hpp</code></td><td>SDL initialization, file picker, audio output, video rendering.</td></tr>
+          <tr><td><code>src/test_video_server.cpp</code></td><td>Small server entrypoint.</td></tr>
+          <tr><td><code>src/server/server.cpp</code></td><td>HTTP routing, JSON config, range responses, dashboard state.</td></tr>
+          <tr><td><code>src/server/network.*</code></td><td>Winsock initialization, socket RAII, send helpers, listener creation.</td></tr>
+          <tr><td><code>src/common/string_utils.*</code></td><td>Shared parsing, trimming, URL decoding, Windows UTF-8 conversion.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="client">
+      <h2>Client Playback Pipeline</h2>
+      <p>The player opens a file path or URL, discovers streams, starts audio and video workers, then keeps SDL rendering on the main thread.</p>
+      <div class="flow">
+        <div class="step"><b>Open</b><span>FFmpeg opens a local path or HTTP URL. If no path is passed, Windows file picker is used.</span></div>
+        <div class="step"><b>Probe</b><span>Best audio and video streams are selected. Codec contexts are created.</span></div>
+        <div class="step"><b>Demux</b><span>A worker reads packets and forwards audio packets to the audio worker.</span></div>
+        <div class="step"><b>Decode</b><span>Video frames queue for rendering. Audio frames queue to SDL output.</span></div>
+        <div class="step"><b>Render</b><span>The main thread uploads YUV or RGBA pixels to SDL textures and presents them.</span></div>
+      </div>
+
+      <div class="grid">
+        <div class="card span-6">
+          <h3>Command Line</h3>
+          <pre>.\build\windows-msvc-vcpkg\Debug\webvideoplayback.exe http://127.0.0.1:8080/real-genius.mp4</pre>
+          <p>Performance CSV writing is disabled by default.</p>
+          <pre>.\build\windows-msvc-vcpkg\Debug\webvideoplayback.exe --performance-report http://127.0.0.1:8080/real-genius.mp4</pre>
+        </div>
+        <div class="card span-6">
+          <h3>Runtime Controls</h3>
+          <ul>
+            <li><code>F1</code> toggles the in-window debug overlay.</li>
+            <li><code>Esc</code> exits playback.</li>
+            <li><code>WEBVIDEOPLAYBACK_AUDIO_LATENCY_MS</code> adjusts audio target latency.</li>
+            <li>The default audio target is <code>150</code> milliseconds.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="server">
+      <h2>Test Server Pipeline</h2>
+      <p>The server is a controlled local origin. It is not a full media platform. It exists to make client behavior observable and reproducible.</p>
+      <div class="flow">
+        <div class="step"><b>Config</b><span>JSON maps public routes to exact local files.</span></div>
+        <div class="step"><b>Listen</b><span>Winsock binds to loopback on the configured port.</span></div>
+        <div class="step"><b>Accept</b><span>Each client connection is handled on a worker thread.</span></div>
+        <div class="step"><b>Resolve</b><span>Requests must match configured routes when a file list exists.</span></div>
+        <div class="step"><b>Stream</b><span>Full or partial file bytes are sent with correct headers.</span></div>
+      </div>
+
+      <div class="grid">
+        <div class="card span-6">
+          <h3>Server Config</h3>
+          <pre>{
+  "port": 8080,
+  "files": [
+    {
+      "route": "/real-genius.mp4",
+      "path": "I:\\Movies\\...\\Real.Genius.1985...mp4"
+    }
+  ]
+}</pre>
+        </div>
+        <div class="card span-6">
+          <h3>Server Run</h3>
+          <pre>.\build\windows-msvc-vcpkg\Debug\webvideoplayback_test_server.exe --config .\real-genius-server.json</pre>
+          <p>The dashboard shows active streams, completed stream bytes, failures, routes, byte counts, and recent output events.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="streaming">
+      <h2>Streaming Contract</h2>
+      <p>The player and server communicate using simple HTTP semantics. FFmpeg requests ranges as needed. The server responds with bytes from the configured file.</p>
+      <div class="timeline">
+        <div class="timeline-row">
+          <b>Initial read</b>
+          <span>The client requests the configured route. The server serves the file or a byte range. It includes <code>Accept-Ranges: bytes</code>.</span>
+        </div>
+        <div class="timeline-row">
+          <b>Range request</b>
+          <span>The client can send <code>Range: bytes=start-end</code>. Valid ranges return <code>206 Partial Content</code>.</span>
+        </div>
+        <div class="timeline-row">
+          <b>Invalid range</b>
+          <span>Out-of-bounds ranges return <code>416 Range Not Satisfiable</code> with <code>Content-Range: bytes */size</code>.</span>
+        </div>
+        <div class="timeline-row">
+          <b>Route policy</b>
+          <span>When JSON file routes are configured, unlisted paths are denied. This keeps tests deterministic.</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="timing">
+      <h2>Timing And Synchronization</h2>
+      <p>Audio is the master clock. Video waits for audio when it is early and drops stale frames only after a large delay.</p>
+      <div class="grid">
+        <div class="card span-6 success">
+          <h3>Normal Playback</h3>
+          <ul>
+            <li>Audio decode feeds SDL queued audio.</li>
+            <li>A smoothed audio clock advances between SDL queue updates.</li>
+            <li>Video frame timestamps are compared against that clock.</li>
+            <li>Rendered frame timing can be written to CSV when enabled.</li>
+          </ul>
+        </div>
+        <div class="card span-6 warning">
+          <h3>Window Interaction</h3>
+          <ul>
+            <li>Move and resize interactions pause playback.</li>
+            <li>Audio output pauses.</li>
+            <li>Demux and decode workers wait at a pause gate.</li>
+            <li>Playback resumes after mouse release or quiet resize events.</li>
+          </ul>
+        </div>
+      </div>
+
+      <table class="mono-table">
+        <thead>
+          <tr><th>Metric</th><th>Meaning</th><th>Where It Appears</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>total_ms</code></td><td>Total render path time for one presented video frame.</td><td>CSV report</td></tr>
+          <tr><td><code>upload_ms</code></td><td>Time to upload decoded pixels into SDL texture memory.</td><td>CSV report and overlay</td></tr>
+          <tr><td><code>present_ms</code></td><td>Time spent clearing, copying, overlaying, and presenting.</td><td>CSV report and overlay</td></tr>
+          <tr><td><code>av_sync_ms</code></td><td>Difference between video timestamp and audio clock.</td><td>CSV report and overlay</td></tr>
+          <tr><td><code>audio_underruns</code></td><td>Number of times SDL queued audio reached zero.</td><td>CSV report and overlay</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="operations">
+      <h2>Build And Run</h2>
+      <div class="grid">
+        <div class="card span-6">
+          <h3>Build</h3>
+          <pre>cmake --preset windows-msvc-vcpkg
+cmake --build --preset windows-msvc-vcpkg-debug</pre>
+        </div>
+        <div class="card span-6">
+          <h3>Test Scripts</h3>
+          <pre>.\scripts\serve-videos.ps1
+.\scripts\play-real-genius-stream.ps1
+.\scripts\play-starfighter.ps1</pre>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card span-4">
+          <h3>Dependencies</h3>
+          <ul>
+            <li>SDL2</li>
+            <li>FFmpeg</li>
+            <li>FTXUI</li>
+            <li>nlohmann-json</li>
+            <li>Winsock on Windows</li>
+          </ul>
+        </div>
+        <div class="card span-4">
+          <h3>Generated Output</h3>
+          <ul>
+            <li><code>build/</code> contains executables.</li>
+            <li><code>reports/</code> contains optional CSV files.</li>
+            <li>Media files are not stored in the repo.</li>
+          </ul>
+        </div>
+        <div class="card span-4">
+          <h3>Server Dashboard</h3>
+          <ul>
+            <li><code>Q</code> exits the server.</li>
+            <li>Active streams show progress bars.</li>
+            <li>General section shows completed totals.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="support">
+      <h2>Support Guide</h2>
+      <p>Use the dashboard, overlay, and optional CSV report together. The server explains transfer behavior. The player report explains decode, upload, render, and sync behavior.</p>
+      <div class="grid">
+        <div class="card span-6">
+          <h3>Jerky Video</h3>
+          <ul>
+            <li>Enable <code>--performance-report</code>.</li>
+            <li>Check <code>media_time_s</code> for timestamp jumps.</li>
+            <li>Check <code>present_ms</code> for rendering stalls.</li>
+            <li>Check <code>av_sync_ms</code> for clock drift.</li>
+          </ul>
+        </div>
+        <div class="card span-6">
+          <h3>Server Issues</h3>
+          <ul>
+            <li>Confirm the route exists in JSON.</li>
+            <li>Confirm the file path exists locally.</li>
+            <li>Watch active stream progress.</li>
+            <li>Watch failed stream count.</li>
+          </ul>
+        </div>
+        <div class="card span-6">
+          <h3>Audio Problems</h3>
+          <ul>
+            <li>Look for increasing underrun counts.</li>
+            <li>Raise <code>WEBVIDEOPLAYBACK_AUDIO_LATENCY_MS</code>.</li>
+            <li>Inspect whether window interaction pause is active.</li>
+          </ul>
+        </div>
+        <div class="card span-6">
+          <h3>Window Interaction Problems</h3>
+          <ul>
+            <li>Move and resize intentionally pause playback.</li>
+            <li>Resume should happen after mouse release.</li>
+            <li>Resize has a quiet-period fallback.</li>
+          </ul>
+        </div>
+      </div>
+      <p class="footer-note">This presentation is self-contained. Open <code>docs/index.html</code> directly in a browser.</p>
+    </section>
+  </main>
+</body>
+</html>
