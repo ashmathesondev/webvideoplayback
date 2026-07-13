@@ -11,6 +11,18 @@ Render decoded frames through native surfaces when possible.
 The goal is lower CPU use and fewer frame copies.
 The player loop should not own backend-specific details.
 
+## Current Status
+
+`auto` currently selects the FFmpeg backend.
+`ffmpeg` selects the portable FFmpeg plus SDL path.
+`native` selects Media Foundation on Windows.
+The active backend is shown in the player window title.
+
+The Media Foundation backend supports video decode.
+It also supports audio decode for local files and HTTP streams.
+It still presents through the SDL texture render sink.
+Native Direct3D presentation is not implemented yet.
+
 ## Target Backends
 
 Windows:
@@ -106,6 +118,7 @@ The playback loop should not inspect backend surface internals.
 - [x] Add Media Foundation video decode on Windows.
 - [x] Add Media Foundation audio decode on Windows for local files.
 - [x] Add Media Foundation audio decode on Windows for HTTP streams.
+- [x] Show active decoder backend in the window title.
 - [ ] Add Direct3D 12 render sink on Windows.
 - [ ] Add Direct3D 11 render sink on Windows.
 - [ ] Add Vulkan render sink on Windows.
@@ -135,7 +148,7 @@ Existing playback:
 
 Backend behavior:
 
-- Confirm backend selection is visible in diagnostics.
+- Confirm backend selection is visible in the window title.
 - Confirm fallback works when native decode fails.
 - Compare CPU use against the current FFmpeg path.
 - Confirm frame timing and drop counters remain useful.

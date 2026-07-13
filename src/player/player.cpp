@@ -224,7 +224,7 @@ int run(const std::string& path, bool performance_report_enabled, DecoderBackend
 
     std::unique_ptr<IRenderSink> render_sink;
     if (media_info.has_video) {
-        render_sink = std::make_unique<SdlTextureRenderSink>(media_info.video_render);
+        render_sink = std::make_unique<SdlTextureRenderSink>(media_info.video_render, backend.backend_name);
     }
     decoder.start();
 

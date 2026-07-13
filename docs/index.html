@@ -410,7 +410,7 @@
 <div class="page-header anim-up" style="--i:0">
   <div class="eyebrow">Project Overview</div>
   <h1>How does a video player actually work?</h1>
-  <p class="subtitle">This C++ project builds a real media player from scratch — showing every step from opening a video file to rendering pixels on screen and playing audio through your speakers. It also includes a local HTTP streaming server for testing network playback.</p>
+  <p class="subtitle">This C++ project builds a real media player from scratch — showing every step from opening a video file to rendering pixels on screen and playing audio through your speakers. It includes FFmpeg and Windows Media Foundation decoder backends plus a local HTTP streaming server for network playback tests.</p>
 </div>
 
 <div class="diagram">
@@ -422,8 +422,8 @@
       <div class="label">Executables Built</div>
     </div>
     <div class="kpi-card anim-scale" style="--i:2">
-      <div class="value" style="color:var(--teal)">4</div>
-      <div class="label">C++ Libraries Used</div>
+      <div class="value" style="color:var(--teal)">2</div>
+      <div class="label">Decoder Backends</div>
     </div>
     <div class="kpi-card anim-scale" style="--i:3">
       <div class="value" style="color:var(--sage)">3</div>
@@ -451,8 +451,8 @@ graph TD
 
   subgraph Player["webvideoplayback.exe — The Player"]
     MAIN["Main Thread\nSDL event loop\nrender each video frame"]
-    VDEC["Video Decoder Thread\nread container, split packets\ndecode compressed video"]
-    ADEC["Audio Decoder Thread\ndecode audio packets\nfeed SDL audio queue"]
+    VDEC["Decoder Backend\nread container, split streams\ndecode compressed video"]
+    ADEC["Audio Path\ndecode samples\nfeed SDL audio queue"]
   end
 
   subgraph Server["webvideoplayback_test_server.exe"]
@@ -465,10 +465,10 @@ graph TD
   VDEC -->|"audio packets"| ADEC
   ADEC -->|"PCM audio samples"| SDL2
   MAIN -->|"pixels"| SDL2
-  VDEC <-->|"demux + decode"| FFMPEG
-  ADEC <-->|"decode audio"| FFMPEG
+  VDEC <-->|"demux + decode"| BACKEND
+  ADEC <-->|"decode audio"| BACKEND
   SDL2["SDL2 Window + Speaker Output"]
-  FFMPEG["FFmpeg Codec Library"]
+  BACKEND["FFmpeg or Media Foundation"]
   HTTP -.->|"HTTP byte-range stream"| YOU
   DASH --- HTTP
       </pre>
@@ -492,6 +492,8 @@ graph TD
           <li>Pass a file path or URL as an argument to skip the picker</li>
           <li>Press <code>F1</code> to show a real-time debug overlay</li>
           <li>Press <code>ESC</code> to close the player</li>
+          <li>Selects <code>--decoder-backend auto|ffmpeg|native</code></li>
+          <li>Shows the active backend in the window title</li>
           <li>Uses <code>--performance-report</code> flag to record per-frame timing CSV files</li>
         </ul>
       </div>
@@ -511,17 +513,22 @@ graph TD
 
   <div class="flow-arrow anim-up" style="--i:8">
     <svg viewBox="0 0 20 20"><path d="M10 4 L10 16 M6 12 L10 16 L14 12"/></svg>
-    four libraries doing the heavy lifting
+    libraries and platform APIs doing the heavy lifting
   </div>
 
   <!-- Libraries -->
   <div class="section section--sage anim-up" style="--i:9">
-    <div class="section-label"><span class="dot"></span> The Four Libraries — What Each One Does</div>
+    <div class="section-label"><span class="dot"></span> Libraries and Platform APIs — What Each One Does</div>
     <div class="inner-grid">
       <div class="ve-card">
         <span class="tag tag--terra" style="margin-bottom:10px;display:inline-block">FFmpeg</span>
-        <div class="title">The Codec and Decoder Engine</div>
-        <p class="desc">FFmpeg understands hundreds of video and audio formats — MP4, WebM, MKV, MP3, AAC, Opus, and many more. When you have a compressed video file, FFmpeg knows how to decompress it into raw pixel data (for the screen) and raw audio samples (for the speakers). Writing all those decoders from scratch would take years; FFmpeg provides them ready to use.</p>
+        <div class="title">The Portable Decoder Backend</div>
+        <p class="desc">FFmpeg understands hundreds of video and audio formats — MP4, WebM, MKV, MP3, AAC, Opus, and many more. It is the default backend today and remains the portable path for local files and HTTP URLs.</p>
+      </div>
+      <div class="ve-card">
+        <span class="tag tag--plum" style="margin-bottom:10px;display:inline-block">Media Foundation</span>
+        <div class="title">The Windows Native Decoder Backend</div>
+        <p class="desc">Media Foundation is the opt-in native backend on Windows. It decodes video and audio from local files and HTTP streams, then currently hands CPU frames and PCM audio to the same SDL presentation and audio layers.</p>
       </div>
       <div class="ve-card">
         <span class="tag tag--teal" style="margin-bottom:10px;display:inline-block">SDL2</span>
@@ -536,7 +543,7 @@ graph TD
       <div class="ve-card">
         <span class="tag tag--amber" style="margin-bottom:10px;display:inline-block">nlohmann-json</span>
         <div class="title">The JSON Config Parser</div>
-        <p class="desc">A widely used C++ library for reading and writing JSON files. The test server uses it to load a config file that maps URL routes (like <code>/movie.mp4</code>) to actual file paths on disk. This lets you control which files the server serves without recompiling the code.</p>
+        <p class="desc">A widely used C++ library for reading and writing JSON files. The test server uses it to load a config file that maps URL routes (like <code>/movie.mp4</code>) to actual file paths on disk.</p>
       </div>
     </div>
   </div>
@@ -554,7 +561,7 @@ graph TD
       <div class="pipe-step pipe-step--terra">
         <div class="num">STEP 1</div>
         <div class="name">Open File</div>
-        <div class="detail">FFmpeg opens<br>the container<br>format (.mp4, .mkv)</div>
+        <div class="detail">Selected backend opens<br>the container<br>format (.mp4, .mkv)</div>
       </div>
       <div class="pipe-arrow">&#8594;</div>
       <div class="pipe-step pipe-step--teal">
@@ -600,7 +607,7 @@ graph TD
     <div class="inner-grid">
       <div class="ve-card">
         <div class="title">Build (PowerShell)</div>
-        <p class="desc" style="margin-bottom:10px">Uses CMake with vcpkg. All four libraries download and build automatically &mdash; no manual installs needed.</p>
+        <p class="desc" style="margin-bottom:10px">Uses CMake with vcpkg. Third-party libraries download and build automatically &mdash; no manual installs needed.</p>
         <pre style="font-family:var(--font-mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;white-space:pre-wrap;word-break:break-word;line-height:1.7">cmake --preset windows-msvc-vcpkg
 cmake --build --preset windows-msvc-vcpkg-debug</pre>
       </div>
@@ -623,9 +630,11 @@ cmake --build --preset windows-msvc-vcpkg-debug</pre>
       <div class="ve-card">
         <div class="title">Useful Flags and Settings</div>
         <ul class="node-list">
+          <li><code>--decoder-backend auto|ffmpeg|native</code> &mdash; choose decoder backend</li>
           <li><code>--performance-report</code> &mdash; save per-frame timing CSV to <code>reports/</code></li>
           <li><code>--config file.json</code> &mdash; server loads explicit file routes from JSON</li>
           <li><code>WEBVIDEOPLAYBACK_AUDIO_LATENCY_MS</code> &mdash; env var to tune audio buffer size (default 150 ms)</li>
+          <li><code>WEBVIDEOPLAYBACK_DECODER_BACKEND</code> &mdash; env var for backend selection</li>
           <li>Release build path: <code>build/.../Release/webvideoplayback.exe</code></li>
         </ul>
       </div>

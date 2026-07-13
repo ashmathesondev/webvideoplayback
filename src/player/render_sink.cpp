@@ -126,10 +126,11 @@ std::array<std::uint8_t, 7> glyph(char character)
 } // namespace
 
 struct SdlTextureRenderSink::Impl {
-    explicit Impl(const VideoRenderConfig& config)
+    Impl(const VideoRenderConfig& config, const std::string& backend_name)
     {
+        const std::string window_title = "Web Video Playback [" + backend_name + "]";
         window.reset(SDL_CreateWindow(
-            "Web Video Playback",
+            window_title.c_str(),
             SDL_WINDOWPOS_CENTERED,
             SDL_WINDOWPOS_CENTERED,
             config.width,
@@ -334,8 +335,8 @@ struct SdlTextureRenderSink::Impl {
     std::vector<std::uint8_t> pixels;
 };
 
-SdlTextureRenderSink::SdlTextureRenderSink(const VideoRenderConfig& config)
-    : impl_(std::make_unique<Impl>(config))
+SdlTextureRenderSink::SdlTextureRenderSink(const VideoRenderConfig& config, const std::string& backend_name)
+    : impl_(std::make_unique<Impl>(config, backend_name))
 {
 }
 

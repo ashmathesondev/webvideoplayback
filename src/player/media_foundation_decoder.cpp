@@ -397,6 +397,8 @@ struct MediaFoundationDecoder::Impl {
 
     std::optional<DecodedVideoFrame> read_video_frame()
     {
+        pump_audio_buffer();
+
         if (!queued_video_frames.empty()) {
             DecodedVideoFrame frame = std::move(queued_video_frames.front());
             queued_video_frames.pop_front();
@@ -427,7 +429,18 @@ struct MediaFoundationDecoder::Impl {
             return;
         }
 
-        while (!eof && audio_output->queued_milliseconds() < audio_output->target_latency_ms()) {
+        pump_audio_buffer();
+    }
+
+    void pump_audio_buffer()
+    {
+        if (!info.has_audio || audio_output == nullptr || eof) {
+            return;
+        }
+
+        while (!eof
+            && audio_output->queued_milliseconds() < native_audio_buffer_ms()
+            && queued_video_frames.size() < max_queued_video_frames) {
             std::optional<DecodedVideoFrame> frame = read_next_sample();
             if (frame) {
                 queued_video_frames.push_back(std::move(*frame));
@@ -568,6 +581,13 @@ struct MediaFoundationDecoder::Impl {
 
     static constexpr UINT32 output_sample_rate = 48000;
     static constexpr UINT32 output_channels = 2;
+    static constexpr std::size_t max_queued_video_frames = 8;
+
+    double native_audio_buffer_ms() const
+    {
+        const double scaled_target_ms = audio_target_ms * 4.0;
+        return scaled_target_ms > 600.0 ? scaled_target_ms : 600.0;
+    }
 
     ComGuard com;
     MediaFoundationGuard media_foundation;

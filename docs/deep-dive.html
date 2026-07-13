@@ -409,30 +409,30 @@
   <div style="margin-bottom:40px" class="anim-up" style="--i:0">
     <div class="eyebrow">Architecture &amp; Implementation</div>
     <h1>Inside the Video Player</h1>
-    <p class="subtitle">A detailed walkthrough of how every subsystem works — threading, synchronization, the decode pipeline, HTTP streaming, and performance measurement. Written for someone who knows some programming but is new to multimedia systems.</p>
+    <p class="subtitle">A detailed walkthrough of how every subsystem works — backend selection, threading, synchronization, the decode pipeline, HTTP streaming, and performance measurement. Written for someone who knows some programming but is new to multimedia systems.</p>
   </div>
 
   <!-- Thread model -->
   <div style="margin-bottom:24px" class="anim-up" style="--i:1">
     <div class="card card--teal card--elevated">
-      <div class="section-label teal-label"><span class="dot"></span> The Three-Thread Model</div>
-      <p style="margin-bottom:14px;font-size:13px;color:var(--text-dim)">Most simple programs run one thing at a time. A media player needs to do three completely different jobs simultaneously, without any one of them blocking the others. The solution: three OS threads running in parallel.</p>
+      <div class="section-label teal-label"><span class="dot"></span> Decoder Backend Model</div>
+      <p style="margin-bottom:14px;font-size:13px;color:var(--text-dim)">The player loop talks to decoder and render interfaces. The selected decoder backend owns the details of demuxing, decoding, timing, and audio queueing.</p>
       <div class="thread-bar anim-up" style="--i:2">
         <div class="thread-segment" style="background:var(--teal-dim)">
           <div class="t-name" style="color:var(--teal)">Main Thread</div>
           <div class="t-desc">Runs the SDL event loop. Handles keyboard/mouse input. Pulls decoded video frames from the queue and renders them to the GPU. Responsible for everything visible on screen.</div>
         </div>
         <div class="thread-segment" style="background:var(--cyan-dim)">
-          <div class="t-name" style="color:var(--cyan)">VideoDecoderWorker</div>
-          <div class="t-desc">Reads the container file (MP4, MKV, etc.), demultiplexes packets, sends video packets to the video decoder, and forwards audio packets to the AudioDecoderWorker. This is the "reader" of the file.</div>
+          <div class="t-name" style="color:var(--cyan)">FFmpeg Backend</div>
+          <div class="t-desc">The default path. It uses FFmpeg to open containers, decode video on a worker, feed audio packets to an audio worker, and present frames through SDL textures.</div>
         </div>
         <div class="thread-segment" style="background:var(--amber-dim)">
-          <div class="t-name" style="color:var(--amber)">AudioDecoderWorker</div>
-          <div class="t-desc">Receives raw audio packets from the VideoDecoderWorker queue. Decodes them, converts sample format and sample rate using libswresample, and pushes PCM audio data directly into SDL's audio queue for playback.</div>
+          <div class="t-name" style="color:var(--amber)">Media Foundation Backend</div>
+          <div class="t-desc">The opt-in Windows native path. It uses Media Foundation Source Reader output for video and audio, then queues BGRA frames and float PCM through the existing SDL layers.</div>
         </div>
       </div>
       <div class="callout" style="margin-top:14px">
-        <strong>Why three threads?</strong> Without separate threads, decoding one slow frame would cause the audio to stutter. Separating concerns means video decoding, audio decoding, and rendering each advance at their own pace — connected only through shared queues.
+        <strong>Backend selection:</strong> <code>auto</code> currently selects FFmpeg. <code>native</code> selects Media Foundation on Windows. The active backend appears in the window title.
       </div>
     </div>
   </div>
@@ -441,21 +441,22 @@
   <div class="grid grid--2" style="margin-bottom:24px">
     <div class="card card--cyan anim-up" style="--i:3">
       <div class="section-label cyan-label"><span class="dot"></span> Bounded Packet Queues</div>
-      <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Threads communicate through queues — like a conveyor belt between workers. Both queues are <em>bounded</em>: they hold a fixed maximum number of items. When a queue is full, the producer thread <em>blocks</em> (waits) instead of filling up all your RAM.</p>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Backends communicate with the render loop through bounded queues or bounded read-ahead. When a queue is full, the producer waits instead of filling all available memory.</p>
       <ul class="list" style="font-size:12px">
-        <li>Video frame queue: decoded frames waiting to be rendered by the main thread</li>
-        <li>Audio packet queue: compressed audio packets waiting to be decoded by AudioDecoderWorker</li>
+        <li>FFmpeg video frame queue: decoded frames waiting to be rendered</li>
+        <li>FFmpeg audio packet queue: compressed packets waiting for audio decode</li>
+        <li>Media Foundation video queue: frames read while filling audio</li>
         <li>Blocking prevents unbounded memory growth if decoding outruns rendering</li>
         <li>Implemented with <code>std::mutex</code> + <code>std::condition_variable</code> (C++ standard library)</li>
       </ul>
     </div>
     <div class="card card--rose anim-up" style="--i:4">
       <div class="section-label rose-label"><span class="dot"></span> PlaybackPause — Shared Atomic Gate</div>
-      <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">When you drag or resize the SDL window, the OS can steal time from the render thread. If video and audio threads keep running, frames pile up and audio gets ahead. <code>PlaybackPause</code> pauses all threads simultaneously.</p>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">When you drag or resize the SDL window, the OS can steal time from the render thread. If decode keeps running, frames pile up and audio gets ahead. <code>PlaybackPause</code> gates backend work during window interaction.</p>
       <ul class="list" style="font-size:12px">
-        <li>Implemented as an <code>std::atomic&lt;bool&gt;</code> shared across all three threads</li>
+        <li>Implemented as an <code>std::atomic&lt;bool&gt;</code> shared across playback components</li>
         <li>Atomics are thread-safe without a mutex — any thread can read/write simultaneously</li>
-        <li>All threads spin-check the flag before each unit of work, then yield if paused</li>
+        <li>Decode paths check the flag before each unit of work</li>
         <li>Prevents audio "galloping ahead" of video during window moves</li>
       </ul>
     </div>
@@ -502,36 +503,36 @@ video_output.<span class="fn">render_frame</span>(frame);</pre>
   <div style="margin-bottom:24px" class="anim-up" style="--i:6">
     <div class="card card--violet">
       <div class="section-label violet-label"><span class="dot"></span> The Decode Pipeline in Detail</div>
-      <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Each video file is actually a container — a wrapper holding one or more independent streams of compressed data. Getting a frame onto the screen requires passing through multiple layers of FFmpeg and SDL APIs.</p>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Each video file is a container holding compressed streams. The selected backend opens the container, decodes video and audio, then hands presentation work to SDL.</p>
       <div class="flow-row" style="margin-bottom:14px">
         <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
           <div class="f-step" style="color:var(--violet)">1</div>
           <div class="f-name">Open Input</div>
-          <div class="f-note">avformat_open_input reads the container header. Identifies format (MP4, MKV, RTSP) and streams inside it.</div>
+          <div class="f-note">FFmpeg uses avformat_open_input. Media Foundation uses Source Reader. Both identify streams inside the container.</div>
         </div>
         <div class="flow-arrow">›</div>
         <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
           <div class="f-step" style="color:var(--violet)">2</div>
           <div class="f-name">Find Streams</div>
-          <div class="f-note">avformat_find_stream_info probes the file to identify which streams are video and which are audio.</div>
+          <div class="f-note">The backend probes native stream types to find video and audio streams.</div>
         </div>
         <div class="flow-arrow">›</div>
         <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
           <div class="f-step" style="color:var(--violet)">3</div>
           <div class="f-name">Demux</div>
-          <div class="f-note">av_read_frame extracts one packet at a time. Routes video packets to video decoder; audio packets to audio queue.</div>
+          <div class="f-note">FFmpeg demuxes packets. Media Foundation reads samples through the Source Reader.</div>
         </div>
         <div class="flow-arrow">›</div>
         <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
           <div class="f-step" style="color:var(--violet)">4</div>
           <div class="f-name">Decode</div>
-          <div class="f-note">avcodec_send_packet + avcodec_receive_frame expand compressed data into raw pixel/sample data.</div>
+          <div class="f-note">FFmpeg decoders emit AVFrames. Media Foundation emits BGRA video samples and float PCM audio.</div>
         </div>
         <div class="flow-arrow">›</div>
         <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
           <div class="f-step" style="color:var(--violet)">5</div>
           <div class="f-name">Convert</div>
-          <div class="f-note">YUV420P fast path: SDL_UpdateYUVTexture. Other formats: libswscale converts to RGBA before upload.</div>
+          <div class="f-note">FFmpeg YUV420P uses SDL_UpdateYUVTexture. Other CPU formats convert to RGBA before upload.</div>
         </div>
         <div class="flow-arrow">›</div>
         <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
@@ -563,8 +564,8 @@ video_output.<span class="fn">render_frame</span>(frame);</pre>
       <div class="section-label teal-label"><span class="dot"></span> RAII Wrappers — Memory Safety Around C APIs</div>
       <div class="grid grid--2">
         <div>
-          <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">FFmpeg is a C library — it doesn't manage memory for you. Every <code>avcodec_open2</code> needs a matching <code>avcodec_free_context</code>, and if your program exits early (an error, a thrown exception), leaked memory means crashes or resource exhaustion.</p>
-          <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">The file <span class="file-pill">src/player/av_support.hpp</span> defines custom RAII (Resource Acquisition Is Initialization) smart pointer types for every FFmpeg handle. They wrap C pointers in C++ destructors so cleanup is automatic and exception-safe.</p>
+          <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">FFmpeg and Media Foundation are C-style APIs. Handles must be released on every success and error path.</p>
+          <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">The FFmpeg path uses RAII wrappers in <span class="file-pill">src/player/av_support.hpp</span>. The Media Foundation path uses WRL <code>ComPtr</code> wrappers for COM interfaces.</p>
           <div class="callout">
             <strong>RAII principle:</strong> Acquire a resource when you construct an object; release it when the object is destroyed. The destructor runs even if an exception throws, so you can never forget to clean up.
           </div>
@@ -598,18 +599,19 @@ video_output.<span class="fn">render_frame</span>(frame);</pre>
   <div class="grid grid--2" style="margin-bottom:24px">
     <div class="card card--green anim-up" style="--i:8">
       <div class="section-label green-label"><span class="dot"></span> AudioOutput &mdash; How Sound Gets Played</div>
-      <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">Defined in <span class="file-pill">src/player/sdl_media.hpp</span>. SDL2's audio system works by calling a callback function whenever the sound card needs more samples. AudioOutput converts decoded audio into the sample format SDL expects using libswresample, then pushes it into SDL's internal audio queue.</p>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">Defined in <span class="file-pill">src/player/audio_output.hpp</span>. AudioOutput pushes decoded float samples into SDL's internal audio queue and tracks the playback clock.</p>
       <ul class="list" style="font-size:12px">
         <li>Target audio buffer size: 150 ms (tunable via <code>WEBVIDEOPLAYBACK_AUDIO_LATENCY_MS</code> env var)</li>
-        <li>Conversion pipeline: FFmpeg AVFrame &rarr; libswresample &rarr; float32 stereo &rarr; SDL queue</li>
+        <li>FFmpeg pipeline: AVFrame &rarr; libswresample &rarr; float32 stereo &rarr; SDL queue</li>
+        <li>Media Foundation pipeline: float PCM sample &rarr; SDL queue</li>
         <li><code>playback_seconds()</code> returns a running estimate of how much audio has been consumed by the hardware</li>
         <li>This estimate is the master clock that video synchronizes against</li>
         <li>Higher latency = more stable audio (fewer underruns) but more sync lag</li>
       </ul>
     </div>
     <div class="card card--cyan anim-up" style="--i:9">
-      <div class="section-label cyan-label"><span class="dot"></span> VideoOutput &mdash; Letterboxing and GPU Rendering</div>
-      <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">Handles window creation, GPU texture management, and letterboxing — the black bars you see when a video's aspect ratio doesn't match the window. The calculation computes a <code>video_destination_rect</code> that preserves the video's original proportions.</p>
+      <div class="section-label cyan-label"><span class="dot"></span> Render Sink &mdash; Letterboxing and GPU Rendering</div>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">Handles window creation, GPU texture management, the backend-labeled title bar, and letterboxing. The calculation computes a <code>video_destination_rect</code> that preserves the video's original proportions.</p>
       <ul class="list" style="font-size:12px">
         <li>SDL_Renderer uses the GPU for texture scaling &mdash; no CPU-side pixel scaling</li>
         <li>YUV420P fast path: calls <code>SDL_UpdateYUVTexture</code> (three-plane Y/U/V upload)</li>
@@ -648,7 +650,7 @@ video_output.<span class="fn">render_frame</span>(frame);</pre>
       <div class="grid grid--21">
         <div>
           <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Real streaming services (YouTube, Netflix) don't send you the entire video file before you can watch it. They send it piece by piece using HTTP byte-range requests &mdash; your player asks "give me bytes 1,000,000 to 2,000,000", downloads that chunk, plays it, then asks for the next chunk. This lets you seek to any position without re-downloading the whole file.</p>
-          <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">The test server in this project implements exactly this. It serves files from disk over HTTP and understands the <code>Range: bytes=X-Y</code> header. FFmpeg's networking layer sends range requests automatically when it opens an HTTP URL, so the player streams seamlessly over the local network.</p>
+          <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">The test server in this project implements exactly this. It serves files from disk over HTTP and understands the <code>Range: bytes=X-Y</code> header. FFmpeg and Media Foundation both use byte-range requests when opening HTTP media.</p>
           <div class="callout callout--violet">
             <strong>Security note:</strong> <code>resolve_request_path()</code> blocks path traversal attacks (<code>/../</code> sequences in URLs). It normalizes the path and verifies the resolved file is inside the configured root directory before opening it.
           </div>
@@ -694,34 +696,27 @@ sequenceDiagram
   participant User
   participant Main as Main Thread
   participant SDL as SDL2
-  participant VD as VideoDecoder Thread
-  participant AD as AudioDecoder Thread
+  participant Backend as Decoder Backend
   participant FF as FFmpeg
+  participant MF as Media Foundation
 
   User->>Main: run_player(argc, argv)
   Main->>SDL: SDL_Init (video + audio)
-  Main->>FF: open_input(url or path)
-  FF-->>Main: FormatContext + stream info
-  Main->>FF: open_decoder (video stream)
-  Main->>FF: open_decoder (audio stream)
+  Main->>Backend: create_decoder_backend(path, preference)
+  Backend->>FF: auto or ffmpeg path
+  Backend->>MF: native Windows path
+  Backend-->>Main: media_info + backend_name
   Main->>SDL: Create window + renderer + texture
-  Main->>AD: Start AudioDecoderWorker thread
-  Main->>VD: Start VideoDecoderWorker thread
+  Main->>Backend: start()
 
-  VD->>FF: av_read_frame (demux loop)
-  FF-->>VD: video packet
-  VD->>FF: avcodec_send_packet
-  FF-->>VD: AVFrame (decoded video)
-  VD->>Main: push frame to video queue
-  VD-->>AD: push audio packet to audio queue
-  AD->>FF: avcodec_send_packet
-  FF-->>AD: AVFrame (decoded audio)
-  AD->>SDL: SDL_QueueAudio (PCM samples)
-  SDL-->>AD: audio playback started
+  Main->>Backend: audio_preroll_ready()
+  Backend->>SDL: SDL_QueueAudio (PCM samples)
+  SDL-->>Backend: audio playback clock
 
-  Main->>Main: pop frame from queue
+  Main->>Backend: pop_video_frame()
+  Backend-->>Main: decoded video frame
   Main->>Main: wait for audio clock sync
-  Main->>SDL: SDL_UpdateYUVTexture (GPU upload)
+  Main->>SDL: SDL_UpdateTexture or SDL_UpdateYUVTexture
   Main->>SDL: SDL_RenderCopy (draw to window)
   SDL-->>User: First frame visible
         </pre>
@@ -739,9 +734,15 @@ sequenceDiagram
           <ul class="list" style="font-size:12px">
             <li><span class="file-pill">src/main.cpp</span> — entry point; SDL.h must be here, delegates to run_player</li>
             <li><span class="file-pill">src/player/player.hpp</span> — declares <code>run_player()</code></li>
-            <li><span class="file-pill">src/player/player.cpp</span> — core playback loop, all three worker classes, sync logic, PerformanceReport</li>
+            <li><span class="file-pill">src/player/player.cpp</span> — core playback loop, sync logic, PerformanceReport</li>
+            <li><span class="file-pill">src/player/decoder_backend.hpp</span> — backend preference and playback decoder interface</li>
+            <li><span class="file-pill">src/player/decoder_backend.cpp</span> — chooses FFmpeg or Media Foundation</li>
+            <li><span class="file-pill">src/player/ffmpeg_media_decoder.cpp</span> — FFmpeg demux, decode, workers, and audio queueing</li>
+            <li><span class="file-pill">src/player/media_foundation_decoder.cpp</span> — Windows Media Foundation Source Reader backend</li>
             <li><span class="file-pill">src/player/av_support.hpp</span> — FFmpeg RAII wrappers, open_input, open_decoder, frame_seconds, stream_fps</li>
-            <li><span class="file-pill">src/player/sdl_media.hpp</span> — AudioOutput, VideoOutput, DebugStats, debug overlay, Windows file picker</li>
+            <li><span class="file-pill">src/player/audio_output.hpp</span> — SDL audio queue and playback clock</li>
+            <li><span class="file-pill">src/player/render_sink.hpp</span> — SDL texture render sink and debug overlay</li>
+            <li><span class="file-pill">src/player/sdl_platform.hpp</span> — SDL guard, file picker, memory stats</li>
           </ul>
         </div>
         <div>
@@ -753,8 +754,8 @@ sequenceDiagram
           </ul>
           <div class="tag tag--amber" style="margin-top:14px;margin-bottom:10px">Build</div>
           <ul class="list" style="font-size:12px">
-            <li><span class="file-pill">CMakeLists.txt</span> — two targets, C++20, vcpkg, links SDL2/FFmpeg/ftxui/ws2_32/comdlg32/psapi</li>
-            <li><span class="file-pill">vcpkg.json</span> — declares all four library dependencies for vcpkg to download</li>
+            <li><span class="file-pill">CMakeLists.txt</span> — two targets, C++20, vcpkg, links SDL2, FFmpeg, Media Foundation, FTXUI, and server libraries</li>
+            <li><span class="file-pill">vcpkg.json</span> — declares third-party dependencies for vcpkg to download</li>
           </ul>
         </div>
       </div>

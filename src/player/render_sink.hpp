@@ -11,6 +11,7 @@ extern "C" {
 }
 
 #include <memory>
+#include <string>
 
 namespace webvideoplayback::player {
 
@@ -50,7 +51,7 @@ public:
 
 class SdlTextureRenderSink final : public IRenderSink {
 public:
-    explicit SdlTextureRenderSink(const VideoRenderConfig& config);
+    SdlTextureRenderSink(const VideoRenderConfig& config, const std::string& backend_name);
     ~SdlTextureRenderSink() override;
 
     void resize(int width, int height) override;
