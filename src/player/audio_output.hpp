@@ -8,6 +8,7 @@ extern "C" {
 }
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
@@ -16,9 +17,11 @@ namespace webvideoplayback::player {
 class AudioOutput {
 public:
     AudioOutput(const AVCodecContext& codec, double target_latency_ms);
+    AudioOutput(int sample_rate, int channels, double target_latency_ms);
     ~AudioOutput();
 
     void queue(const AVFrame& frame);
+    void queue_float_pcm(const void* data, std::size_t byte_count);
     void mark_media_end(double media_end_seconds);
     double playback_seconds() const;
     double clock_remaining_seconds() const;

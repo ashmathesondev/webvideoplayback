@@ -10,6 +10,7 @@ extern "C" {
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -20,16 +21,7 @@ struct AudioOutput::Impl {
     explicit Impl(const AVCodecContext& codec, double target_latency_ms)
         : target_latency_ms(target_latency_ms)
     {
-        SDL_AudioSpec desired = {};
-        desired.freq = output_sample_rate;
-        desired.format = AUDIO_F32SYS;
-        desired.channels = output_channels;
-        desired.samples = 4096;
-
-        device = SDL_OpenAudioDevice(nullptr, 0, &desired, &obtained, 0);
-        if (device == 0) {
-            throw std::runtime_error(std::string("SDL_OpenAudioDevice failed: ") + SDL_GetError());
-        }
+        open_device(output_sample_rate, output_channels);
 
         AVChannelLayout output_layout;
         av_channel_layout_default(&output_layout, output_channels);
@@ -55,10 +47,31 @@ struct AudioOutput::Impl {
         SDL_PauseAudioDevice(device, 0);
     }
 
+    Impl(int sample_rate, int channels, double target_latency_ms)
+        : target_latency_ms(target_latency_ms)
+    {
+        open_device(sample_rate, channels);
+        SDL_PauseAudioDevice(device, 0);
+    }
+
     ~Impl()
     {
         if (device != 0) {
             SDL_CloseAudioDevice(device);
+        }
+    }
+
+    void open_device(int sample_rate, int channels)
+    {
+        SDL_AudioSpec desired = {};
+        desired.freq = sample_rate;
+        desired.format = AUDIO_F32SYS;
+        desired.channels = static_cast<Uint8>(channels);
+        desired.samples = 4096;
+
+        device = SDL_OpenAudioDevice(nullptr, 0, &desired, &obtained, 0);
+        if (device == 0) {
+            throw std::runtime_error(std::string("SDL_OpenAudioDevice failed: ") + SDL_GetError());
         }
     }
 
@@ -84,6 +97,11 @@ AudioOutput::AudioOutput(const AVCodecContext& codec, double target_latency_ms)
 {
 }
 
+AudioOutput::AudioOutput(int sample_rate, int channels, double target_latency_ms)
+    : impl_(std::make_unique<Impl>(sample_rate, channels, target_latency_ms))
+{
+}
+
 AudioOutput::~AudioOutput() = default;
 
 void AudioOutput::queue(const AVFrame& frame)
@@ -105,6 +123,13 @@ void AudioOutput::queue(const AVFrame& frame)
 
     const int bytes = converted * Impl::output_channels * bytes_per_sample;
     if (SDL_QueueAudio(impl_->device, impl_->buffer.data(), static_cast<Uint32>(bytes)) != 0) {
+        throw std::runtime_error(std::string("SDL_QueueAudio failed: ") + SDL_GetError());
+    }
+}
+
+void AudioOutput::queue_float_pcm(const void* data, std::size_t byte_count)
+{
+    if (SDL_QueueAudio(impl_->device, data, static_cast<Uint32>(byte_count)) != 0) {
         throw std::runtime_error(std::string("SDL_QueueAudio failed: ") + SDL_GetError());
     }
 }

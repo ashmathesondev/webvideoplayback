@@ -104,7 +104,8 @@ The playback loop should not inspect backend surface internals.
 - [x] Preserve the current FFmpeg plus SDL path first.
 - [x] Add backend selection by platform and feature flag.
 - [x] Add Media Foundation video decode on Windows.
-- [ ] Add Media Foundation audio decode on Windows.
+- [x] Add Media Foundation audio decode on Windows for local files.
+- [x] Add Media Foundation audio decode on Windows for HTTP streams.
 - [ ] Add Direct3D 12 render sink on Windows.
 - [ ] Add Direct3D 11 render sink on Windows.
 - [ ] Add Vulkan render sink on Windows.
