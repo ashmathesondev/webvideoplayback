@@ -55,6 +55,9 @@ Performance CSV files are written to `reports/`.
 CSV reporting is off by default.
 Enable it with `--performance-report`.
 `--perf-report` also works.
+Select a decoder backend with `--decoder-backend auto|ffmpeg|native`.
+`WEBVIDEOPLAYBACK_DECODER_BACKEND` also works.
+Only `ffmpeg` is implemented currently.
 Set `WEBVIDEOPLAYBACK_AUDIO_LATENCY_MS` to tune queued audio.
 The default target is `150`.
 

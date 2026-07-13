@@ -4,7 +4,7 @@
 // video on worker threads, and keeps SDL rendering on the main thread. Audio is
 // the master playback clock. Window moves and resizes explicitly pause decode
 // and audio output, then resume once interaction settles.
-#include "player/ffmpeg_media_decoder.hpp"
+#include "player/decoder_backend.hpp"
 #include "player/playback_pause.hpp"
 #include "player/sdl_media.hpp"
 
@@ -46,7 +46,12 @@ struct PerformanceSample {
 
 class PerformanceReport {
 public:
-    PerformanceReport(bool enabled, const std::string& media_path, const VideoStreamInfo& video_info, double audio_target_ms)
+    PerformanceReport(
+        bool enabled,
+        const std::string& media_path,
+        const VideoStreamInfo& video_info,
+        double audio_target_ms,
+        const std::string& backend_name)
     {
         if (!enabled) {
             return;
@@ -61,6 +66,7 @@ public:
         }
 
         file_ << "media_path," << csv_escape(media_path) << "\n";
+        file_ << "decoder_backend," << csv_escape(backend_name) << "\n";
         file_ << "video_codec," << csv_escape(video_info.codec_name) << "\n";
         file_ << "pixel_format," << csv_escape(video_info.pixel_format) << "\n";
         file_ << "fps," << video_info.fps << "\n";
@@ -141,6 +147,7 @@ private:
 
 struct PlayerOptions {
     std::optional<std::string> media_path;
+    DecoderBackendPreference decoder_backend = configured_decoder_backend_preference();
     bool performance_report = false;
 };
 
@@ -151,10 +158,12 @@ PlayerOptions parse_player_options(int argc, char** argv)
         const std::string arg = argv[index];
         if (arg == "--performance-report" || arg == "--perf-report") {
             options.performance_report = true;
+        } else if (arg == "--decoder-backend" && index + 1 < argc) {
+            options.decoder_backend = parse_decoder_backend_preference(argv[++index]);
         } else if (!options.media_path) {
             options.media_path = arg;
         } else {
-            throw std::runtime_error("usage: webvideoplayback.exe [--performance-report] [media-path-or-url]");
+            throw std::runtime_error("usage: webvideoplayback.exe [--performance-report] [--decoder-backend auto|ffmpeg|native] [media-path-or-url]");
         }
     }
     return options;
@@ -205,11 +214,12 @@ EventState pump_events(bool& running)
 
 
 
-int run(const std::string& path, bool performance_report_enabled)
+int run(const std::string& path, bool performance_report_enabled, DecoderBackendPreference decoder_backend)
 {
     PlaybackPause playback_pause;
     const double audio_target_ms = configured_audio_target_ms();
-    FfmpegMediaDecoder decoder(path, audio_target_ms, playback_pause);
+    DecoderBackendSelection backend = create_decoder_backend(path, audio_target_ms, playback_pause, decoder_backend);
+    FfmpegMediaDecoder& decoder = *backend.decoder;
     const MediaInfo media_info = decoder.media_info();
 
     std::unique_ptr<IRenderSink> render_sink;
@@ -222,7 +232,7 @@ int run(const std::string& path, bool performance_report_enabled)
     bool show_overlay = false;
     bool playback_started = !decoder.has_audio();
     std::uint64_t frame_number = 0;
-    PerformanceReport report(performance_report_enabled, path, media_info.video, audio_target_ms);
+    PerformanceReport report(performance_report_enabled, path, media_info.video, audio_target_ms, backend.backend_name);
     auto playback_start = std::chrono::steady_clock::now();
     auto last_loop_time = playback_start;
     bool interaction_paused = false;
@@ -443,7 +453,7 @@ int run_player(int argc, char** argv)
             return 0;
         }
 
-        return run(*options.media_path, options.performance_report);
+        return run(*options.media_path, options.performance_report, options.decoder_backend);
     } catch (const std::exception& error) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Playback error", error.what(), nullptr);
         return 1;

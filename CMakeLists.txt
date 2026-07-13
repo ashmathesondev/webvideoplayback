@@ -16,6 +16,7 @@ add_executable(webvideoplayback WIN32
     src/common/string_utils.cpp
     src/player/audio_output.cpp
     src/player/av_support.cpp
+    src/player/decoder_backend.cpp
     src/player/ffmpeg_media_decoder.cpp
     src/player/player.cpp
     src/player/render_sink.cpp

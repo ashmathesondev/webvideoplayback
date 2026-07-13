@@ -102,9 +102,11 @@ The playback loop should not inspect backend surface internals.
 - [x] Extract current FFmpeg decode logic behind `IMediaDecoder`.
 - [x] Extract current SDL video output behind `IRenderSink`.
 - [x] Preserve the current FFmpeg plus SDL path first.
-- [ ] Add backend selection by platform and feature flag.
+- [x] Add backend selection by platform and feature flag.
 - [ ] Add Media Foundation decode on Windows.
+- [ ] Add Direct3D 12 render sink on Windows.
 - [ ] Add Direct3D 11 render sink on Windows.
+- [ ] Add Vulkan render sink on Windows.
 - [ ] Add AVFoundation or VideoToolbox decode on macOS.
 - [ ] Add Metal render sink on macOS.
 - [ ] Revisit Linux hardware decode after Windows and macOS.
