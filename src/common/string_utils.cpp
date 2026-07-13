@@ -86,6 +86,22 @@ std::string wide_to_utf8(const std::wstring& value)
     WideCharToMultiByte(CP_UTF8, 0, value.c_str(), -1, result.data(), size, nullptr, nullptr);
     return result;
 }
+
+std::wstring utf8_to_wide(const std::string& value)
+{
+    if (value.empty()) {
+        return {};
+    }
+
+    const int size = MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, nullptr, 0);
+    if (size <= 0) {
+        throw std::runtime_error("failed to convert path from UTF-8");
+    }
+
+    std::wstring result(static_cast<std::size_t>(size - 1), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, value.c_str(), -1, result.data(), size);
+    return result;
+}
 #endif
 
 } // namespace webvideoplayback::utils

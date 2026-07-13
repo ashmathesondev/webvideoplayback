@@ -77,6 +77,12 @@ struct VideoStreamInfo {
     int bit_rate = 0;
 };
 
+struct VideoRenderConfig {
+    int width = 0;
+    int height = 0;
+    AVPixelFormat pixel_format = AV_PIX_FMT_NONE;
+};
+
 // Timing captured while demuxing one packet.
 struct PacketTiming {
     double demux_ms = 0.0;
@@ -97,6 +103,7 @@ struct DecodedAudioFrame {
 
 struct MediaInfo {
     VideoStreamInfo video;
+    VideoRenderConfig video_render;
     bool has_video = false;
     bool has_audio = false;
 };
@@ -121,6 +128,7 @@ double stream_fps(const AVStream& stream);
 
 // Builds user-facing video metadata from the stream and codec.
 VideoStreamInfo video_stream_info(const AVStream& stream, const AVCodecContext& codec);
+VideoRenderConfig video_render_config(const AVCodecContext& codec);
 
 // Finds and opens the best decoder for the requested media type.
 StreamDecoder open_decoder(AVFormatContext& format, AVMediaType type);

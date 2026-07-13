@@ -10,10 +10,10 @@
 
 namespace webvideoplayback::player {
 
-class FfmpegMediaDecoder final : public IMediaDecoder {
+class MediaFoundationDecoder final : public IMediaDecoder {
 public:
-    FfmpegMediaDecoder(const std::string& path, double audio_target_ms, const PlaybackPause& playback_pause);
-    ~FfmpegMediaDecoder() override;
+    MediaFoundationDecoder(const std::string& path, double audio_target_ms, const PlaybackPause& playback_pause);
+    ~MediaFoundationDecoder() override;
 
     MediaInfo media_info() const override;
     void start() override;
@@ -22,7 +22,7 @@ public:
     std::optional<DecodedVideoFrame> pop_video_frame() override;
     std::optional<DecodedAudioFrame> pop_audio_frame() override;
 
-    bool finished();
+    bool finished() const;
     bool has_audio() const;
     AudioOutput* audio_output();
     bool has_audio_clock() const;

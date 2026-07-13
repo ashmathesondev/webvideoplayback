@@ -1,5 +1,9 @@
 #include "player/decoder_backend.hpp"
 
+#ifdef _WIN32
+#include "player/media_foundation_decoder.hpp"
+#endif
+
 #include <cstdlib>
 #include <memory>
 #include <stdexcept>
@@ -20,7 +24,11 @@ std::string lower_ascii(std::string value)
 
 bool native_backend_available()
 {
+#ifdef _WIN32
+    return true;
+#else
     return false;
+#endif
 }
 
 } // namespace
@@ -85,6 +93,11 @@ DecoderBackendSelection create_decoder_backend(
         if (!native_backend_available()) {
             throw std::runtime_error("native decoder backend is not implemented yet");
         }
+#ifdef _WIN32
+        MediaFoundationDecoder probe(path, audio_target_ms, playback_pause);
+        static_cast<void>(probe);
+        throw std::runtime_error("Media Foundation decoder opens media, but frame delivery is not implemented yet");
+#endif
     }
 
     return {

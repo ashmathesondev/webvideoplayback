@@ -421,6 +421,7 @@ struct FfmpegMediaDecoder::Impl {
         info.has_audio = audio.codec != nullptr;
         if (info.has_video) {
             info.video = video_stream_info(*format->streams[video.stream_index], *video.codec);
+            info.video_render = video_render_config(*video.codec);
         }
     }
 
@@ -449,14 +450,6 @@ FfmpegMediaDecoder::~FfmpegMediaDecoder()
 MediaInfo FfmpegMediaDecoder::media_info() const
 {
     return impl_->info;
-}
-
-const AVCodecContext& FfmpegMediaDecoder::video_codec() const
-{
-    if (!impl_->video.codec) {
-        throw std::runtime_error("input has no video stream");
-    }
-    return *impl_->video.codec;
 }
 
 void FfmpegMediaDecoder::start()

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "player/audio_output.hpp"
+#include "player/av_support.hpp"
 
 #include <SDL.h>
 
@@ -49,7 +50,7 @@ public:
 
 class SdlTextureRenderSink final : public IRenderSink {
 public:
-    explicit SdlTextureRenderSink(const AVCodecContext& codec);
+    explicit SdlTextureRenderSink(const VideoRenderConfig& config);
     ~SdlTextureRenderSink() override;
 
     void resize(int width, int height) override;

@@ -18,6 +18,7 @@ add_executable(webvideoplayback WIN32
     src/player/av_support.cpp
     src/player/decoder_backend.cpp
     src/player/ffmpeg_media_decoder.cpp
+    src/player/media_foundation_decoder.cpp
     src/player/player.cpp
     src/player/render_sink.cpp
     src/player/sdl_platform.cpp
@@ -43,7 +44,7 @@ target_link_libraries(webvideoplayback PRIVATE
 )
 
 if(WIN32)
-    target_link_libraries(webvideoplayback PRIVATE comdlg32 psapi)
+    target_link_libraries(webvideoplayback PRIVATE comdlg32 mfplat mfreadwrite mfuuid ole32 psapi)
 
     add_executable(webvideoplayback_test_server
         src/test_video_server.cpp

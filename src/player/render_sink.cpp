@@ -126,14 +126,14 @@ std::array<std::uint8_t, 7> glyph(char character)
 } // namespace
 
 struct SdlTextureRenderSink::Impl {
-    explicit Impl(const AVCodecContext& codec)
+    explicit Impl(const VideoRenderConfig& config)
     {
         window.reset(SDL_CreateWindow(
             "Web Video Playback",
             SDL_WINDOWPOS_CENTERED,
             SDL_WINDOWPOS_CENTERED,
-            codec.width,
-            codec.height,
+            config.width,
+            config.height,
             SDL_WINDOW_RESIZABLE));
         if (!window) {
             throw std::runtime_error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
@@ -146,22 +146,22 @@ struct SdlTextureRenderSink::Impl {
 
         texture.reset(SDL_CreateTexture(
             renderer.get(),
-            codec.pix_fmt == AV_PIX_FMT_YUV420P ? SDL_PIXELFORMAT_IYUV : SDL_PIXELFORMAT_RGBA32,
+            config.pixel_format == AV_PIX_FMT_YUV420P ? SDL_PIXELFORMAT_IYUV : SDL_PIXELFORMAT_RGBA32,
             SDL_TEXTUREACCESS_STREAMING,
-            codec.width,
-            codec.height));
+            config.width,
+            config.height));
         if (!texture) {
             throw std::runtime_error(std::string("SDL_CreateTexture failed: ") + SDL_GetError());
         }
 
-        direct_yuv = codec.pix_fmt == AV_PIX_FMT_YUV420P;
+        direct_yuv = config.pixel_format == AV_PIX_FMT_YUV420P;
         if (!direct_yuv) {
             scaler.reset(sws_getContext(
-                codec.width,
-                codec.height,
-                codec.pix_fmt,
-                codec.width,
-                codec.height,
+                config.width,
+                config.height,
+                config.pixel_format,
+                config.width,
+                config.height,
                 AV_PIX_FMT_RGBA,
                 SWS_BILINEAR,
                 nullptr,
@@ -172,8 +172,8 @@ struct SdlTextureRenderSink::Impl {
             }
         }
 
-        width = codec.width;
-        height = codec.height;
+        width = config.width;
+        height = config.height;
         if (!direct_yuv) {
             pixels.resize(static_cast<std::size_t>(width * height * 4));
         }
@@ -334,8 +334,8 @@ struct SdlTextureRenderSink::Impl {
     std::vector<std::uint8_t> pixels;
 };
 
-SdlTextureRenderSink::SdlTextureRenderSink(const AVCodecContext& codec)
-    : impl_(std::make_unique<Impl>(codec))
+SdlTextureRenderSink::SdlTextureRenderSink(const VideoRenderConfig& config)
+    : impl_(std::make_unique<Impl>(config))
 {
 }
 
