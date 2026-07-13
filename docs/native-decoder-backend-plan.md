@@ -11,6 +11,18 @@ Render decoded frames through native surfaces when possible.
 The goal is lower CPU use and fewer frame copies.
 The player loop should not own backend-specific details.
 
+## Current Status
+
+`auto` currently selects the FFmpeg backend.
+`ffmpeg` selects the portable FFmpeg plus SDL path.
+`native` selects Media Foundation on Windows.
+The active backend is shown in the player window title.
+
+The Media Foundation backend supports video decode.
+It also supports audio decode for local files and HTTP streams.
+It still presents through the SDL texture render sink.
+Native Direct3D presentation is not implemented yet.
+
 ## Target Backends
 
 Windows:
@@ -97,18 +109,23 @@ The portable fallback should pass CPU pixel planes.
 It should also carry presentation timestamp metadata.
 The playback loop should not inspect backend surface internals.
 
-## Implementation Steps
+## Implementation Checklist
 
-1. Extract current FFmpeg decode logic behind `IMediaDecoder`.
-2. Extract current SDL video output behind `IRenderSink`.
-3. Preserve the current FFmpeg plus SDL path first.
-4. Add backend selection by platform and feature flag.
-5. Add Media Foundation decode on Windows.
-6. Add Direct3D 11 render sink on Windows.
-7. Add AVFoundation or VideoToolbox decode on macOS.
-8. Add Metal render sink on macOS.
-9. Revisit Linux hardware decode after Windows and macOS.
-10. Keep FFmpeg fallback available on every platform.
+- [x] Extract current FFmpeg decode logic behind `IMediaDecoder`.
+- [x] Extract current SDL video output behind `IRenderSink`.
+- [x] Preserve the current FFmpeg plus SDL path first.
+- [x] Add backend selection by platform and feature flag.
+- [x] Add Media Foundation video decode on Windows.
+- [x] Add Media Foundation audio decode on Windows for local files.
+- [x] Add Media Foundation audio decode on Windows for HTTP streams.
+- [x] Show active decoder backend in the window title.
+- [ ] Add Direct3D 12 render sink on Windows.
+- [ ] Add Direct3D 11 render sink on Windows.
+- [ ] Add Vulkan render sink on Windows.
+- [ ] Add AVFoundation or VideoToolbox decode on macOS.
+- [ ] Add Metal render sink on macOS.
+- [ ] Revisit Linux hardware decode after Windows and macOS.
+- [ ] Keep FFmpeg fallback available on every platform.
 
 Each step should keep playback runnable.
 Avoid mixing native backend work into playback policy.
@@ -131,7 +148,7 @@ Existing playback:
 
 Backend behavior:
 
-- Confirm backend selection is visible in diagnostics.
+- Confirm backend selection is visible in the window title.
 - Confirm fallback works when native decode fails.
 - Compare CPU use against the current FFmpeg path.
 - Confirm frame timing and drop counters remain useful.

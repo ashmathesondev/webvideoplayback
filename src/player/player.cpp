@@ -4,28 +4,20 @@
 // video on worker threads, and keeps SDL rendering on the main thread. Audio is
 // the master playback clock. Window moves and resizes explicitly pause decode
 // and audio output, then resume once interaction settles.
-#include "player/av_support.hpp"
+#include "player/decoder_backend.hpp"
+#include "player/playback_pause.hpp"
 #include "player/sdl_media.hpp"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-}
-
-#include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <ctime>
 #include <cstdint>
-#include <deque>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -54,7 +46,12 @@ struct PerformanceSample {
 
 class PerformanceReport {
 public:
-    PerformanceReport(bool enabled, const std::string& media_path, const VideoStreamInfo& video_info, double audio_target_ms)
+    PerformanceReport(
+        bool enabled,
+        const std::string& media_path,
+        const VideoStreamInfo& video_info,
+        double audio_target_ms,
+        const std::string& backend_name)
     {
         if (!enabled) {
             return;
@@ -69,6 +66,7 @@ public:
         }
 
         file_ << "media_path," << csv_escape(media_path) << "\n";
+        file_ << "decoder_backend," << csv_escape(backend_name) << "\n";
         file_ << "video_codec," << csv_escape(video_info.codec_name) << "\n";
         file_ << "pixel_format," << csv_escape(video_info.pixel_format) << "\n";
         file_ << "fps," << video_info.fps << "\n";
@@ -149,6 +147,7 @@ private:
 
 struct PlayerOptions {
     std::optional<std::string> media_path;
+    DecoderBackendPreference decoder_backend = configured_decoder_backend_preference();
     bool performance_report = false;
 };
 
@@ -159,10 +158,12 @@ PlayerOptions parse_player_options(int argc, char** argv)
         const std::string arg = argv[index];
         if (arg == "--performance-report" || arg == "--perf-report") {
             options.performance_report = true;
+        } else if (arg == "--decoder-backend" && index + 1 < argc) {
+            options.decoder_backend = parse_decoder_backend_preference(argv[++index]);
         } else if (!options.media_path) {
             options.media_path = arg;
         } else {
-            throw std::runtime_error("usage: webvideoplayback.exe [--performance-report] [media-path-or-url]");
+            throw std::runtime_error("usage: webvideoplayback.exe [--performance-report] [--decoder-backend auto|ffmpeg|native] [media-path-or-url]");
         }
     }
     return options;
@@ -176,58 +177,32 @@ struct EventState {
     bool overlay_toggle = false;
 };
 
-// Shared gate used to stop demux and decode during window interactions.
-class PlaybackPause {
-public:
-    void set_paused(bool paused)
-    {
-        paused_.store(paused);
-    }
-
-    bool paused() const
-    {
-        return paused_.load();
-    }
-
-    void wait(const std::atomic_bool& stop_requested) const
-    {
-        while (!stop_requested.load() && paused_.load()) {
-            std::this_thread::sleep_until(std::chrono::steady_clock::now() + std::chrono::milliseconds(10));
-        }
-    }
-
-private:
-    std::atomic_bool paused_ = false;
-};
-
 EventState pump_events(bool& running)
 {
     EventState state;
     SDL_Event event;
     while (SDL_PollEvent(&event) != 0) {
-        if (event.type == SDL_QUIT) {
+        if (event.type == SDL_EVENT_QUIT) {
             running = false;
         }
-        if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
             running = false;
         }
-        if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_F1) {
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F1) {
             state.overlay_toggle = true;
         }
-        if (event.type == SDL_WINDOWEVENT) {
-            switch (event.window.event) {
-            case SDL_WINDOWEVENT_MOVED:
-            case SDL_WINDOWEVENT_RESIZED:
-            case SDL_WINDOWEVENT_SIZE_CHANGED:
-            case SDL_WINDOWEVENT_MAXIMIZED:
-            case SDL_WINDOWEVENT_RESTORED:
+        switch (event.type) {
+        case SDL_EVENT_WINDOW_MOVED:
+        case SDL_EVENT_WINDOW_RESIZED:
+        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        case SDL_EVENT_WINDOW_MAXIMIZED:
+        case SDL_EVENT_WINDOW_RESTORED:
                 state.window_interaction = true;
-                break;
-            default:
-                break;
-            }
+            break;
+        default:
+            break;
         }
-        if (event.type == SDL_MOUSEBUTTONUP && event.button.button == SDL_BUTTON_LEFT) {
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT) {
             state.interaction_finished = true;
         }
     }
@@ -237,376 +212,37 @@ EventState pump_events(bool& running)
 
 
 
-// Owns all SDL video resources. Only the main thread calls this class.
-// Converts decoded audio frames, queues them to SDL, and updates the clock.
-void decode_audio_packet(
-    AVCodecContext& codec,
-    const AVStream& stream,
-    const AVPacket& packet,
-    AudioOutput& output,
-    std::atomic<double>& last_audio_end_seconds)
+int run(const std::string& path, bool performance_report_enabled, DecoderBackendPreference decoder_backend)
 {
-    throw_if_error(avcodec_send_packet(&codec, &packet), "send audio packet");
-
-    FramePtr frame(av_frame_alloc());
-    if (!frame) {
-        throw std::runtime_error("failed to allocate audio frame");
-    }
-
-    while (true) {
-        const int result = avcodec_receive_frame(&codec, frame.get());
-        if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
-            break;
-        }
-        throw_if_error(result, "receive audio frame");
-        output.queue(*frame);
-        const double audio_end_seconds = frame_end_seconds(*frame, stream);
-        output.mark_media_end(audio_end_seconds);
-        last_audio_end_seconds.store(audio_end_seconds);
-        av_frame_unref(frame.get());
-    }
-}
-
-// Audio decode worker. Packet input is bounded to limit memory growth.
-class AudioDecoderWorker {
-public:
-    AudioDecoderWorker(CodecContextPtr codec, const AVStream& stream, double target_latency_ms, const PlaybackPause& playback_pause)
-        : codec_(std::move(codec)), stream_(stream), output_(*codec_, target_latency_ms), playback_pause_(playback_pause)
-    {
-        worker_ = std::thread([this] { run(); });
-    }
-
-    ~AudioDecoderWorker()
-    {
-        {
-            std::lock_guard lock(mutex_);
-            stop_requested_.store(true);
-        }
-        queue_changed_.notify_all();
-        queue_space_.notify_all();
-        if (worker_.joinable()) {
-            worker_.join();
-        }
-    }
-
-    void push(const AVPacket& packet)
-    {
-        AVPacket* cloned = av_packet_clone(&packet);
-        if (cloned == nullptr) {
-            throw std::runtime_error("failed to clone audio packet");
-        }
-
-        PacketPtr packet_copy(cloned);
-        std::unique_lock lock(mutex_);
-        queue_space_.wait(lock, [this] {
-            return stop_requested_.load() || packet_queue_.size() < max_packets_;
-        });
-        if (stop_requested_.load()) {
-            return;
-        }
-
-        packet_queue_.push_back(std::move(packet_copy));
-        lock.unlock();
-        queue_changed_.notify_one();
-    }
-
-    AudioOutput& output()
-    {
-        return output_;
-    }
-
-    const AudioOutput& output() const
-    {
-        return output_;
-    }
-
-    double audio_playback_seconds() const
-    {
-        return output_.playback_seconds();
-    }
-
-    bool has_clock() const
-    {
-        return last_audio_end_seconds_.load() > 0.0;
-    }
-
-    bool preroll_ready() const
-    {
-        return has_clock() && output_.queued_milliseconds() >= output_.target_latency_ms();
-    }
-
-private:
-    void run()
-    {
-        while (true) {
-            PacketPtr packet;
-            {
-                std::unique_lock lock(mutex_);
-                queue_changed_.wait(lock, [this] {
-                    return stop_requested_.load() || !packet_queue_.empty();
-                });
-
-                if (stop_requested_.load() && packet_queue_.empty()) {
-                    break;
-                }
-
-                packet = std::move(packet_queue_.front());
-                packet_queue_.pop_front();
-                queue_space_.notify_one();
-            }
-
-            playback_pause_.wait(stop_requested_);
-            decode_audio_packet(*codec_, stream_, *packet, output_, last_audio_end_seconds_);
-            output_.wait_until_below(output_.target_latency_ms(), stop_requested_);
-        }
-    }
-
-    static constexpr std::size_t max_packets_ = 256;
-
-    CodecContextPtr codec_;
-    const AVStream& stream_;
-    AudioOutput output_;
-    const PlaybackPause& playback_pause_;
-    std::deque<PacketPtr> packet_queue_;
-    std::mutex mutex_;
-    std::condition_variable queue_changed_;
-    std::condition_variable queue_space_;
-    std::atomic_bool stop_requested_ = false;
-    std::atomic<double> last_audio_end_seconds_ = 0.0;
-    std::thread worker_;
-};
-
-struct DecodedVideoFrame {
-    FramePtr frame;
-    double media_time_s = 0.0;
-    PacketTiming packet_timing;
-    double send_packet_ms = 0.0;
-    double decode_ms = 0.0;
-};
-
-// Demuxes the shared media stream and decodes video frames off the UI thread.
-// Audio packets are forwarded to AudioDecoderWorker from the same demux loop.
-class VideoDecoderWorker {
-public:
-    VideoDecoderWorker(
-        AVFormatContext& format,
-        CodecContextPtr codec,
-        int video_stream_index,
-        int audio_stream_index,
-        AudioDecoderWorker* audio_worker,
-        const PlaybackPause& playback_pause)
-        : format_(format),
-          codec_(std::move(codec)),
-          video_stream_index_(video_stream_index),
-          audio_stream_index_(audio_stream_index),
-          audio_worker_(audio_worker),
-          playback_pause_(playback_pause)
-    {
-        worker_ = std::thread([this] { run(); });
-    }
-
-    ~VideoDecoderWorker()
-    {
-        stop_requested_.store(true);
-        frame_available_.notify_all();
-        frame_space_.notify_all();
-        if (worker_.joinable()) {
-            worker_.join();
-        }
-    }
-
-    std::optional<DecodedVideoFrame> pop()
-    {
-        std::lock_guard lock(mutex_);
-        if (error_) {
-            std::rethrow_exception(error_);
-        }
-        if (frames_.empty()) {
-            return std::nullopt;
-        }
-
-        DecodedVideoFrame frame = std::move(frames_.front());
-        frames_.pop_front();
-        frame_space_.notify_one();
-        return frame;
-    }
-
-    bool finished()
-    {
-        std::lock_guard lock(mutex_);
-        if (error_) {
-            std::rethrow_exception(error_);
-        }
-        return eof_ && frames_.empty();
-    }
-
-private:
-    void push_frame(DecodedVideoFrame frame)
-    {
-        {
-            std::unique_lock lock(mutex_);
-            frame_space_.wait(lock, [this] {
-                return stop_requested_.load() || frames_.size() < max_frames_;
-            });
-            if (stop_requested_.load()) {
-                return;
-            }
-            frames_.push_back(std::move(frame));
-        }
-        frame_available_.notify_one();
-    }
-
-    void decode_video_packet(const AVPacket& packet, PacketTiming packet_timing)
-    {
-        const auto send_start = std::chrono::steady_clock::now();
-        throw_if_error(avcodec_send_packet(codec_.get(), &packet), "send video packet");
-        const auto send_end = std::chrono::steady_clock::now();
-        const double send_packet_ms = std::chrono::duration<double, std::milli>(send_end - send_start).count();
-
-        FramePtr frame(av_frame_alloc());
-        if (!frame) {
-            throw std::runtime_error("failed to allocate video frame");
-        }
-
-        while (!stop_requested_.load()) {
-            const auto decode_start = std::chrono::steady_clock::now();
-            const int result = avcodec_receive_frame(codec_.get(), frame.get());
-            const auto decode_end = std::chrono::steady_clock::now();
-            const double decode_ms = std::chrono::duration<double, std::milli>(decode_end - decode_start).count();
-            if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
-                break;
-            }
-            throw_if_error(result, "receive video frame");
-
-            AVFrame* cloned = av_frame_clone(frame.get());
-            if (cloned == nullptr) {
-                throw std::runtime_error("failed to clone video frame");
-            }
-
-            DecodedVideoFrame decoded;
-            decoded.frame = FramePtr(cloned);
-            decoded.media_time_s = frame_seconds(*frame, *format_.streams[video_stream_index_]);
-            decoded.packet_timing = packet_timing;
-            decoded.send_packet_ms = send_packet_ms;
-            decoded.decode_ms = decode_ms;
-            push_frame(std::move(decoded));
-            av_frame_unref(frame.get());
-        }
-    }
-
-    void run()
-    {
-        try {
-            PacketPtr packet(av_packet_alloc());
-            if (!packet) {
-                throw std::runtime_error("failed to allocate packet");
-            }
-
-            while (!stop_requested_.load()) {
-                playback_pause_.wait(stop_requested_);
-                const auto demux_start = std::chrono::steady_clock::now();
-                const int read_result = av_read_frame(&format_, packet.get());
-                const auto demux_end = std::chrono::steady_clock::now();
-                const PacketTiming packet_timing{
-                    std::chrono::duration<double, std::milli>(demux_end - demux_start).count()};
-
-                if (read_result == AVERROR_EOF) {
-                    break;
-                }
-                throw_if_error(read_result, "read frame");
-
-                if (packet->stream_index == video_stream_index_) {
-                    decode_video_packet(*packet, packet_timing);
-                } else if (audio_worker_ != nullptr && packet->stream_index == audio_stream_index_) {
-                    audio_worker_->push(*packet);
-                }
-
-                if (audio_worker_ != nullptr && audio_worker_->has_clock()) {
-                    const double packet_time = packet_seconds(*packet, *format_.streams[packet->stream_index]);
-                    while (!stop_requested_.load() && packet_time > audio_worker_->audio_playback_seconds() + max_demux_ahead_seconds_) {
-                        std::this_thread::sleep_until(std::chrono::steady_clock::now() + std::chrono::milliseconds(5));
-                    }
-                }
-
-                av_packet_unref(packet.get());
-            }
-        } catch (...) {
-            std::lock_guard lock(mutex_);
-            error_ = std::current_exception();
-        }
-
-        {
-            std::lock_guard lock(mutex_);
-            eof_ = true;
-        }
-        frame_available_.notify_all();
-    }
-
-    static constexpr std::size_t max_frames_ = 6;
-    static constexpr double max_demux_ahead_seconds_ = 3.0;
-
-    AVFormatContext& format_;
-    CodecContextPtr codec_;
-    int video_stream_index_ = -1;
-    int audio_stream_index_ = -1;
-    AudioDecoderWorker* audio_worker_ = nullptr;
-    const PlaybackPause& playback_pause_;
-    mutable std::mutex mutex_;
-    std::condition_variable frame_available_;
-    std::condition_variable frame_space_;
-    std::deque<DecodedVideoFrame> frames_;
-    std::exception_ptr error_;
-    std::atomic_bool stop_requested_ = false;
-    bool eof_ = false;
-    std::thread worker_;
-};
-
-int run(const std::string& path, bool performance_report_enabled)
-{
-    FormatPtr format = open_input(path);
-
-    StreamDecoder video = open_decoder(*format, AVMEDIA_TYPE_VIDEO);
-    StreamDecoder audio = open_decoder(*format, AVMEDIA_TYPE_AUDIO);
-
-    if (!video.codec && !audio.codec) {
-        throw std::runtime_error("input has no decodable audio or video streams");
-    }
-
-    std::unique_ptr<VideoOutput> video_output;
-    VideoStreamInfo video_info;
-    if (video.codec) {
-        video_info = video_stream_info(*format->streams[video.stream_index], *video.codec);
-        video_output = std::make_unique<VideoOutput>(*video.codec);
-    }
-
     PlaybackPause playback_pause;
-    std::unique_ptr<AudioDecoderWorker> audio_worker;
     const double audio_target_ms = configured_audio_target_ms();
-    if (audio.codec) {
-        audio_worker =
-            std::make_unique<AudioDecoderWorker>(std::move(audio.codec), *format->streams[audio.stream_index], audio_target_ms, playback_pause);
+    DecoderBackendSelection backend = create_decoder_backend(path, audio_target_ms, playback_pause, decoder_backend);
+    IPlaybackDecoder& decoder = *backend.decoder;
+    const MediaInfo media_info = decoder.media_info();
+
+    std::unique_ptr<IRenderSink> render_sink;
+    if (media_info.has_video) {
+        render_sink = std::make_unique<SdlTextureRenderSink>(media_info.video_render, backend.backend_name);
+    }
+    decoder.start();
+    if (media_info.has_video && decoder.has_audio()) {
+        if (AudioOutput* output = decoder.audio_output()) {
+            output->pause();
+        }
     }
 
     bool running = true;
     bool show_overlay = false;
-    bool playback_started = audio_worker == nullptr;
+    bool playback_started = !decoder.has_audio();
     std::uint64_t frame_number = 0;
-    PerformanceReport report(performance_report_enabled, path, video_info, audio_target_ms);
+    PerformanceReport report(performance_report_enabled, path, media_info.video, audio_target_ms, backend.backend_name);
     auto playback_start = std::chrono::steady_clock::now();
     auto last_loop_time = playback_start;
     bool interaction_paused = false;
     auto last_interaction_time = playback_start;
 
-    if (video.codec) {
-        VideoDecoderWorker video_worker(
-            *format,
-            std::move(video.codec),
-            video.stream_index,
-            audio.stream_index,
-            audio_worker.get(),
-            playback_pause);
-
-        while (running && !video_worker.finished()) {
+    if (media_info.has_video) {
+        while (running && !decoder.finished()) {
             const EventState events = pump_events(running);
             if (events.overlay_toggle) {
                 show_overlay = !show_overlay;
@@ -618,17 +254,17 @@ int run(const std::string& path, bool performance_report_enabled)
                 playback_pause.set_paused(true);
                 interaction_paused = true;
                 last_interaction_time = std::chrono::steady_clock::now();
-                if (audio_worker) {
-                    audio_worker->output().pause();
+                if (AudioOutput* output = decoder.audio_output()) {
+                    output->pause();
                 }
             }
             if (events.interaction_finished) {
                 playback_pause.set_paused(false);
-                if (audio_worker) {
-                    audio_worker->output().resume();
+                if (AudioOutput* output = decoder.audio_output()) {
+                    output->resume();
                 }
                 playback_start = std::chrono::steady_clock::now() - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                    std::chrono::duration<double>(audio_worker && audio_worker->has_clock() ? audio_worker->audio_playback_seconds() : 0.0));
+                    std::chrono::duration<double>(decoder.has_audio_clock() ? decoder.audio_playback_seconds() : 0.0));
                 last_loop_time = std::chrono::steady_clock::now();
             }
             if (interaction_paused
@@ -637,11 +273,11 @@ int run(const std::string& path, bool performance_report_enabled)
                 // resume after a short quiet period.
                 playback_pause.set_paused(false);
                 interaction_paused = false;
-                if (audio_worker) {
-                    audio_worker->output().resume();
+                if (AudioOutput* output = decoder.audio_output()) {
+                    output->resume();
                 }
                 playback_start = std::chrono::steady_clock::now() - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                    std::chrono::duration<double>(audio_worker && audio_worker->has_clock() ? audio_worker->audio_playback_seconds() : 0.0));
+                    std::chrono::duration<double>(decoder.has_audio_clock() ? decoder.audio_playback_seconds() : 0.0));
                 last_loop_time = std::chrono::steady_clock::now();
             }
             const auto now = std::chrono::steady_clock::now();
@@ -660,9 +296,12 @@ int run(const std::string& path, bool performance_report_enabled)
                 continue;
             }
 
-            if (!playback_started && audio_worker && audio_worker->preroll_ready()) {
+            if (!playback_started && decoder.audio_preroll_ready()) {
                 // Start video only after audio has a usable clock and buffer.
                 playback_started = true;
+                if (AudioOutput* output = decoder.audio_output()) {
+                    output->resume();
+                }
                 playback_start = std::chrono::steady_clock::now();
                 last_loop_time = playback_start;
             }
@@ -672,25 +311,25 @@ int run(const std::string& path, bool performance_report_enabled)
                 continue;
             }
 
-            std::optional<DecodedVideoFrame> decoded = video_worker.pop();
+            std::optional<DecodedVideoFrame> decoded = decoder.pop_video_frame();
             if (!decoded) {
                 std::this_thread::sleep_until(std::chrono::steady_clock::now() + std::chrono::milliseconds(2));
                 continue;
             }
 
             const double target_seconds = decoded->media_time_s;
-            AudioOutput* audio_output = audio_worker ? &audio_worker->output() : nullptr;
-            if (audio_worker != nullptr && audio_worker->has_clock() && audio_output != nullptr && audio_output->queued_size() > 0) {
+            AudioOutput* audio_output = decoder.audio_output();
+            if (decoder.has_audio_clock() && audio_output != nullptr && audio_output->queued_size() > 0) {
                 // Audio is the master clock. Video waits for audio and drops
                 // stale frames only after a large delay.
-                const double audio_seconds = audio_worker->audio_playback_seconds();
+                const double audio_seconds = decoder.audio_playback_seconds();
                 if (target_seconds + 0.250 < audio_seconds) {
                     continue;
                 }
 
                 while (running
                     && audio_output->queued_size() > 0
-                    && target_seconds > audio_worker->audio_playback_seconds() + 0.005) {
+                    && target_seconds > decoder.audio_playback_seconds() + 0.005) {
                     const auto sleep_target = std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
                     const EventState wait_events = pump_events(running);
                     if (wait_events.overlay_toggle) {
@@ -698,15 +337,15 @@ int run(const std::string& path, bool performance_report_enabled)
                     }
                     if (wait_events.interaction_started || wait_events.window_interaction) {
                         playback_pause.set_paused(true);
-                        if (audio_worker) {
-                            audio_worker->output().pause();
+                        if (AudioOutput* output = decoder.audio_output()) {
+                            output->pause();
                         }
                         break;
                     }
                     if (wait_events.interaction_finished) {
                         playback_pause.set_paused(false);
-                        if (audio_worker) {
-                            audio_worker->output().resume();
+                        if (AudioOutput* output = decoder.audio_output()) {
+                            output->resume();
                         }
                     }
                     std::this_thread::sleep_until(sleep_target);
@@ -722,15 +361,15 @@ int run(const std::string& path, bool performance_report_enabled)
                     }
                     if (wait_events.interaction_started || wait_events.window_interaction) {
                         playback_pause.set_paused(true);
-                        if (audio_worker) {
-                            audio_worker->output().pause();
+                        if (AudioOutput* output = decoder.audio_output()) {
+                            output->pause();
                         }
                         break;
                     }
                     if (wait_events.interaction_finished) {
                         playback_pause.set_paused(false);
-                        if (audio_worker) {
-                            audio_worker->output().resume();
+                        if (AudioOutput* output = decoder.audio_output()) {
+                            output->resume();
                         }
                     }
                     std::this_thread::sleep_until(sleep_target);
@@ -741,21 +380,21 @@ int run(const std::string& path, bool performance_report_enabled)
                 break;
             }
 
-            if (audio_worker != nullptr && audio_worker->has_clock() && audio_output != nullptr && audio_output->queued_size() > 0) {
-                const double audio_seconds = audio_worker->audio_playback_seconds();
+            if (decoder.has_audio_clock() && audio_output != nullptr && audio_output->queued_size() > 0) {
+                const double audio_seconds = decoder.audio_playback_seconds();
                 if (target_seconds + 0.250 < audio_seconds) {
                     continue;
                 }
             }
 
-            const VideoFrameTiming timing = video_output->render(
+            const VideoFrameTiming timing = render_sink->present(RenderFrame{
                 *decoded->frame,
                 audio_output,
                 decoded->packet_timing.demux_ms,
                 decoded->send_packet_ms,
                 decoded->decode_ms,
-                show_overlay);
-            const SDL_Rect video_rect = video_output->current_video_rect();
+                show_overlay});
+            const SDL_Rect video_rect = render_sink->current_video_rect();
 
             PerformanceSample sample;
             sample.frame_number = ++frame_number;
@@ -766,21 +405,16 @@ int run(const std::string& path, bool performance_report_enabled)
             sample.audio_queued_ms = audio_output != nullptr ? audio_output->queued_milliseconds() : 0.0;
             sample.audio_target_ms = audio_output != nullptr ? audio_output->target_latency_ms() : 0.0;
             sample.av_sync_ms =
-                audio_worker != nullptr && audio_worker->has_clock() ? (target_seconds - audio_worker->audio_playback_seconds()) * 1000.0 : 0.0;
+                decoder.has_audio_clock() ? (target_seconds - decoder.audio_playback_seconds()) * 1000.0 : 0.0;
             sample.audio_underruns = audio_output != nullptr ? audio_output->underruns() : 0;
-            sample.window_width = video_output->window_width();
-            sample.window_height = video_output->window_height();
+            sample.window_width = render_sink->window_width();
+            sample.window_height = render_sink->window_height();
             sample.display_width = video_rect.w;
             sample.display_height = video_rect.h;
             report.write(sample);
         }
     } else {
-        PacketPtr packet(av_packet_alloc());
-        if (!packet) {
-            throw std::runtime_error("failed to allocate packet");
-        }
-
-        while (running) {
+        while (running && !decoder.finished()) {
             const EventState events = pump_events(running);
             if (events.overlay_toggle) {
                 show_overlay = !show_overlay;
@@ -788,22 +422,14 @@ int run(const std::string& path, bool performance_report_enabled)
             if (!running) {
                 break;
             }
-
-            const int read_result = av_read_frame(format.get(), packet.get());
-            if (read_result == AVERROR_EOF) {
-                break;
-            }
-            throw_if_error(read_result, "read frame");
-
-            if (audio_worker && packet->stream_index == audio.stream_index) {
-                audio_worker->push(*packet);
-            }
-
-            av_packet_unref(packet.get());
+            std::this_thread::sleep_until(std::chrono::steady_clock::now() + std::chrono::milliseconds(10));
         }
     }
 
-    while (audio_worker && audio_worker->output().queued_size() > 0) {
+    while (AudioOutput* output = decoder.audio_output()) {
+        if (output->queued_size() == 0) {
+            break;
+        }
         const auto next_poll = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
         const EventState events = pump_events(running);
         if (events.overlay_toggle) {
@@ -833,7 +459,7 @@ int run_player(int argc, char** argv)
             return 0;
         }
 
-        return run(*options.media_path, options.performance_report);
+        return run(*options.media_path, options.performance_report, options.decoder_backend);
     } catch (const std::exception& error) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Playback error", error.what(), nullptr);
         return 1;

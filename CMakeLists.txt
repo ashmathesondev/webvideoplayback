@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(SDL2 CONFIG REQUIRED)
+find_package(SDL3 CONFIG REQUIRED)
 find_package(FFMPEG REQUIRED)
 find_package(ftxui CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
@@ -14,8 +14,14 @@ find_package(nlohmann_json CONFIG REQUIRED)
 add_executable(webvideoplayback WIN32
     src/main.cpp
     src/common/string_utils.cpp
+    src/player/audio_output.cpp
     src/player/av_support.cpp
+    src/player/decoder_backend.cpp
+    src/player/ffmpeg_media_decoder.cpp
+    src/player/media_foundation_decoder.cpp
     src/player/player.cpp
+    src/player/render_sink.cpp
+    src/player/sdl_platform.cpp
 )
 
 target_include_directories(webvideoplayback PRIVATE
@@ -32,13 +38,12 @@ target_compile_definitions(webvideoplayback PRIVATE
 )
 
 target_link_libraries(webvideoplayback PRIVATE
-    $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
-    $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+    SDL3::SDL3
     ${FFMPEG_LIBRARIES}
 )
 
 if(WIN32)
-    target_link_libraries(webvideoplayback PRIVATE comdlg32 psapi)
+    target_link_libraries(webvideoplayback PRIVATE comdlg32 mfplat mfreadwrite mfuuid ole32 psapi)
 
     add_executable(webvideoplayback_test_server
         src/test_video_server.cpp

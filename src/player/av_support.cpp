@@ -99,6 +99,15 @@ VideoStreamInfo video_stream_info(const AVStream& stream, const AVCodecContext& 
     return info;
 }
 
+VideoRenderConfig video_render_config(const AVCodecContext& codec)
+{
+    VideoRenderConfig config;
+    config.width = codec.width;
+    config.height = codec.height;
+    config.pixel_format = codec.pix_fmt;
+    return config;
+}
+
 StreamDecoder open_decoder(AVFormatContext& format, AVMediaType type)
 {
     const int stream_index = av_find_best_stream(&format, type, -1, -1, nullptr, 0);

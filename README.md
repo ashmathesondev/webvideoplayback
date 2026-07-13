@@ -1,6 +1,6 @@
 # Web Video Playback
 
-C++ and SDL2 application scaffold for local web media playback.
+C++ and SDL3 application scaffold for local web media playback.
 
 ## Architecture Docs
 
@@ -10,16 +10,32 @@ C++ and SDL2 application scaffold for local web media playback.
 
 This project uses CMake and vcpkg manifest mode.
 
-- SDL2 handles the window, rendering, and audio output.
+- SDL3 handles the window, rendering, and audio output.
 - FFmpeg handles container demuxing and audio/video decoding.
+- Media Foundation provides the opt-in Windows native decoder backend.
 - FTXUI renders the test server console dashboard.
 - nlohmann-json parses the test server config file.
 
 ## Build
 
+Use the build script to configure and build both targets:
+
+```powershell
+.\scripts\build.ps1                                        # Debug (default)
+.\scripts\build.ps1 -Configuration Release
+.\scripts\build.ps1 -Configuration RelWithDebInfo
+.\scripts\build.ps1 -Configuration Release -Target Server  # server only
+.\scripts\build.ps1 -Configuration Release -Target Player  # player only
+.\scripts\build.ps1 -h                                     # help
+```
+
+Or manually with CMake:
+
 ```powershell
 cmake --preset windows-msvc-vcpkg
 cmake --build --preset windows-msvc-vcpkg-debug
+cmake --build --preset windows-msvc-vcpkg-release
+cmake --build --preset windows-msvc-vcpkg-relwithdebinfo
 ```
 
 ## Run
@@ -40,8 +56,14 @@ Performance CSV files are written to `reports/`.
 CSV reporting is off by default.
 Enable it with `--performance-report`.
 `--perf-report` also works.
+Select a decoder backend with `--decoder-backend auto|ffmpeg|native`.
+`WEBVIDEOPLAYBACK_DECODER_BACKEND` also works.
+`auto` currently uses the FFmpeg backend.
+`native` uses Media Foundation on Windows.
+The window title shows the active backend.
 Set `WEBVIDEOPLAYBACK_AUDIO_LATENCY_MS` to tune queued audio.
 The default target is `150`.
+The native backend keeps a larger internal audio buffer.
 
 Release build output:
 
@@ -105,6 +127,7 @@ http://127.0.0.1:8080/the-last-starfighter.mp4
 ```
 
 Seeking, subtitles, playlists, and hardware decoding are natural next steps.
+Native Direct3D and Metal render sinks are still planned.
 
 ## Note about assets
 
