@@ -97,18 +97,18 @@ The portable fallback should pass CPU pixel planes.
 It should also carry presentation timestamp metadata.
 The playback loop should not inspect backend surface internals.
 
-## Implementation Steps
+## Implementation Checklist
 
-1. Extract current FFmpeg decode logic behind `IMediaDecoder`.
-2. Extract current SDL video output behind `IRenderSink`.
-3. Preserve the current FFmpeg plus SDL path first.
-4. Add backend selection by platform and feature flag.
-5. Add Media Foundation decode on Windows.
-6. Add Direct3D 11 render sink on Windows.
-7. Add AVFoundation or VideoToolbox decode on macOS.
-8. Add Metal render sink on macOS.
-9. Revisit Linux hardware decode after Windows and macOS.
-10. Keep FFmpeg fallback available on every platform.
+- [x] Extract current FFmpeg decode logic behind `IMediaDecoder`.
+- [x] Extract current SDL video output behind `IRenderSink`.
+- [x] Preserve the current FFmpeg plus SDL path first.
+- [ ] Add backend selection by platform and feature flag.
+- [ ] Add Media Foundation decode on Windows.
+- [ ] Add Direct3D 11 render sink on Windows.
+- [ ] Add AVFoundation or VideoToolbox decode on macOS.
+- [ ] Add Metal render sink on macOS.
+- [ ] Revisit Linux hardware decode after Windows and macOS.
+- [ ] Keep FFmpeg fallback available on every platform.
 
 Each step should keep playback runnable.
 Avoid mixing native backend work into playback policy.

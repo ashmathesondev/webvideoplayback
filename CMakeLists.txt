@@ -14,9 +14,12 @@ find_package(nlohmann_json CONFIG REQUIRED)
 add_executable(webvideoplayback WIN32
     src/main.cpp
     src/common/string_utils.cpp
+    src/player/audio_output.cpp
     src/player/av_support.cpp
     src/player/ffmpeg_media_decoder.cpp
     src/player/player.cpp
+    src/player/render_sink.cpp
+    src/player/sdl_platform.cpp
 )
 
 target_include_directories(webvideoplayback PRIVATE
