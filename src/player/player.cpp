@@ -219,7 +219,7 @@ int run(const std::string& path, bool performance_report_enabled, DecoderBackend
     PlaybackPause playback_pause;
     const double audio_target_ms = configured_audio_target_ms();
     DecoderBackendSelection backend = create_decoder_backend(path, audio_target_ms, playback_pause, decoder_backend);
-    FfmpegMediaDecoder& decoder = *backend.decoder;
+    IPlaybackDecoder& decoder = *backend.decoder;
     const MediaInfo media_info = decoder.media_info();
 
     std::unique_ptr<IRenderSink> render_sink;

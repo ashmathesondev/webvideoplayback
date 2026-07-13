@@ -103,7 +103,8 @@ The playback loop should not inspect backend surface internals.
 - [x] Extract current SDL video output behind `IRenderSink`.
 - [x] Preserve the current FFmpeg plus SDL path first.
 - [x] Add backend selection by platform and feature flag.
-- [ ] Add Media Foundation decode on Windows.
+- [x] Add Media Foundation video decode on Windows.
+- [ ] Add Media Foundation audio decode on Windows.
 - [ ] Add Direct3D 12 render sink on Windows.
 - [ ] Add Direct3D 11 render sink on Windows.
 - [ ] Add Vulkan render sink on Windows.

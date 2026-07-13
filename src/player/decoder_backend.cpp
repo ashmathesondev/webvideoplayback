@@ -1,5 +1,7 @@
 #include "player/decoder_backend.hpp"
 
+#include "player/ffmpeg_media_decoder.hpp"
+
 #ifdef _WIN32
 #include "player/media_foundation_decoder.hpp"
 #endif
@@ -94,9 +96,10 @@ DecoderBackendSelection create_decoder_backend(
             throw std::runtime_error("native decoder backend is not implemented yet");
         }
 #ifdef _WIN32
-        MediaFoundationDecoder probe(path, audio_target_ms, playback_pause);
-        static_cast<void>(probe);
-        throw std::runtime_error("Media Foundation decoder opens media, but frame delivery is not implemented yet");
+        return {
+            std::make_unique<MediaFoundationDecoder>(path, audio_target_ms, playback_pause),
+            "media-foundation",
+        };
 #endif
     }
 

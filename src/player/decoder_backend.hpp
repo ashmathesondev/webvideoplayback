@@ -1,9 +1,11 @@
 #pragma once
 
-#include "player/ffmpeg_media_decoder.hpp"
+#include "player/audio_output.hpp"
+#include "player/av_support.hpp"
 #include "player/playback_pause.hpp"
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace webvideoplayback::player {
@@ -14,8 +16,20 @@ enum class DecoderBackendPreference {
     Native,
 };
 
+class IPlaybackDecoder : public IMediaDecoder {
+public:
+    ~IPlaybackDecoder() override = default;
+
+    virtual bool finished() = 0;
+    virtual bool has_audio() const = 0;
+    virtual AudioOutput* audio_output() = 0;
+    virtual bool has_audio_clock() const = 0;
+    virtual bool audio_preroll_ready() const = 0;
+    virtual double audio_playback_seconds() const = 0;
+};
+
 struct DecoderBackendSelection {
-    std::unique_ptr<FfmpegMediaDecoder> decoder;
+    std::unique_ptr<IPlaybackDecoder> decoder;
     std::string backend_name;
 };
 

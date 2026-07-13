@@ -1,6 +1,6 @@
 #pragma once
 
-#include "player/av_support.hpp"
+#include "player/decoder_backend.hpp"
 #include "player/playback_pause.hpp"
 #include "player/sdl_media.hpp"
 
@@ -10,7 +10,7 @@
 
 namespace webvideoplayback::player {
 
-class MediaFoundationDecoder final : public IMediaDecoder {
+class MediaFoundationDecoder final : public IPlaybackDecoder {
 public:
     MediaFoundationDecoder(const std::string& path, double audio_target_ms, const PlaybackPause& playback_pause);
     ~MediaFoundationDecoder() override;
@@ -22,12 +22,12 @@ public:
     std::optional<DecodedVideoFrame> pop_video_frame() override;
     std::optional<DecodedAudioFrame> pop_audio_frame() override;
 
-    bool finished() const;
-    bool has_audio() const;
-    AudioOutput* audio_output();
-    bool has_audio_clock() const;
-    bool audio_preroll_ready() const;
-    double audio_playback_seconds() const;
+    bool finished() override;
+    bool has_audio() const override;
+    AudioOutput* audio_output() override;
+    bool has_audio_clock() const override;
+    bool audio_preroll_ready() const override;
+    double audio_playback_seconds() const override;
 
 private:
     struct Impl;
