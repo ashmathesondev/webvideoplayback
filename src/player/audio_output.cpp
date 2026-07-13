@@ -44,20 +44,24 @@ struct AudioOutput::Impl {
         throw_if_error(swr_init(resampler.get()), "initialize audio resampler");
         av_channel_layout_uninit(&output_layout);
 
-        SDL_PauseAudioDevice(device, 0);
+        if (!SDL_ResumeAudioStreamDevice(stream)) {
+            throw std::runtime_error(std::string("SDL_ResumeAudioStreamDevice failed: ") + SDL_GetError());
+        }
     }
 
     Impl(int sample_rate, int channels, double target_latency_ms)
         : target_latency_ms(target_latency_ms)
     {
         open_device(sample_rate, channels);
-        SDL_PauseAudioDevice(device, 0);
+        if (!SDL_ResumeAudioStreamDevice(stream)) {
+            throw std::runtime_error(std::string("SDL_ResumeAudioStreamDevice failed: ") + SDL_GetError());
+        }
     }
 
     ~Impl()
     {
-        if (device != 0) {
-            SDL_CloseAudioDevice(device);
+        if (stream != nullptr) {
+            SDL_DestroyAudioStream(stream);
         }
     }
 
@@ -65,20 +69,20 @@ struct AudioOutput::Impl {
     {
         SDL_AudioSpec desired = {};
         desired.freq = sample_rate;
-        desired.format = AUDIO_F32SYS;
-        desired.channels = static_cast<Uint8>(channels);
-        desired.samples = 4096;
+        desired.format = SDL_AUDIO_F32;
+        desired.channels = channels;
 
-        device = SDL_OpenAudioDevice(nullptr, 0, &desired, &obtained, 0);
-        if (device == 0) {
-            throw std::runtime_error(std::string("SDL_OpenAudioDevice failed: ") + SDL_GetError());
+        stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired, nullptr, nullptr);
+        if (stream == nullptr) {
+            throw std::runtime_error(std::string("SDL_OpenAudioDeviceStream failed: ") + SDL_GetError());
         }
+        obtained = desired;
     }
 
     static constexpr int output_sample_rate = 48000;
     static constexpr int output_channels = 2;
 
-    SDL_AudioDeviceID device = 0;
+    SDL_AudioStream* stream = nullptr;
     SDL_AudioSpec obtained = {};
     SwrPtr resampler;
     std::vector<std::uint8_t> buffer;
@@ -122,15 +126,15 @@ void AudioOutput::queue(const AVFrame& frame)
     throw_if_error(converted, "convert audio frame");
 
     const int bytes = converted * Impl::output_channels * bytes_per_sample;
-    if (SDL_QueueAudio(impl_->device, impl_->buffer.data(), static_cast<Uint32>(bytes)) != 0) {
-        throw std::runtime_error(std::string("SDL_QueueAudio failed: ") + SDL_GetError());
+    if (!SDL_PutAudioStreamData(impl_->stream, impl_->buffer.data(), bytes)) {
+        throw std::runtime_error(std::string("SDL_PutAudioStreamData failed: ") + SDL_GetError());
     }
 }
 
 void AudioOutput::queue_float_pcm(const void* data, std::size_t byte_count)
 {
-    if (SDL_QueueAudio(impl_->device, data, static_cast<Uint32>(byte_count)) != 0) {
-        throw std::runtime_error(std::string("SDL_QueueAudio failed: ") + SDL_GetError());
+    if (!SDL_PutAudioStreamData(impl_->stream, data, static_cast<int>(byte_count))) {
+        throw std::runtime_error(std::string("SDL_PutAudioStreamData failed: ") + SDL_GetError());
     }
 }
 
@@ -167,7 +171,8 @@ double AudioOutput::clock_remaining_seconds() const
 
 Uint32 AudioOutput::queued_size() const
 {
-    const Uint32 size = SDL_GetQueuedAudioSize(impl_->device);
+    const int queued = SDL_GetAudioStreamQueued(impl_->stream);
+    const Uint32 size = queued > 0 ? static_cast<Uint32>(queued) : 0;
     if (size == 0) {
         bool expected = false;
         if (impl_->was_empty.compare_exchange_strong(expected, true)) {
@@ -209,7 +214,9 @@ void AudioOutput::pause()
         impl_->clock_wall_seconds.store(std::chrono::duration<double>(now).count());
     }
     impl_->clock_paused.store(true);
-    SDL_PauseAudioDevice(impl_->device, 1);
+    if (!SDL_PauseAudioStreamDevice(impl_->stream)) {
+        throw std::runtime_error(std::string("SDL_PauseAudioStreamDevice failed: ") + SDL_GetError());
+    }
 }
 
 void AudioOutput::resume()
@@ -217,7 +224,9 @@ void AudioOutput::resume()
     const auto now = std::chrono::steady_clock::now().time_since_epoch();
     impl_->clock_wall_seconds.store(std::chrono::duration<double>(now).count());
     impl_->clock_paused.store(false);
-    SDL_PauseAudioDevice(impl_->device, 0);
+    if (!SDL_ResumeAudioStreamDevice(impl_->stream)) {
+        throw std::runtime_error(std::string("SDL_ResumeAudioStreamDevice failed: ") + SDL_GetError());
+    }
 }
 
 void AudioOutput::wait_until_below(double queued_ms, const std::atomic_bool& stop_requested)

@@ -1,6 +1,6 @@
 # Web Video Playback
 
-C++ and SDL2 application scaffold for local web media playback.
+C++ and SDL3 application scaffold for local web media playback.
 
 ## Architecture Docs
 
@@ -10,7 +10,7 @@ C++ and SDL2 application scaffold for local web media playback.
 
 This project uses CMake and vcpkg manifest mode.
 
-- SDL2 handles the window, rendering, and audio output.
+- SDL3 handles the window, rendering, and audio output.
 - FFmpeg handles container demuxing and audio/video decoding.
 - Media Foundation provides the opt-in Windows native decoder backend.
 - FTXUI renders the test server console dashboard.

@@ -452,7 +452,7 @@ graph TD
   subgraph Player["webvideoplayback.exe — The Player"]
     MAIN["Main Thread\nSDL event loop\nrender each video frame"]
     VDEC["Decoder Backend\nread container, split streams\ndecode compressed video"]
-    ADEC["Audio Path\ndecode samples\nfeed SDL audio queue"]
+    ADEC["Audio Path\ndecode samples\nfeed SDL audio stream"]
   end
 
   subgraph Server["webvideoplayback_test_server.exe"]
@@ -463,11 +463,11 @@ graph TD
   YOU -->|"open file or URL"| MAIN
   MAIN <-->|"decoded video frames"| VDEC
   VDEC -->|"audio packets"| ADEC
-  ADEC -->|"PCM audio samples"| SDL2
-  MAIN -->|"pixels"| SDL2
+  ADEC -->|"PCM audio samples"| SDL3
+  MAIN -->|"pixels"| SDL3
   VDEC <-->|"demux + decode"| BACKEND
   ADEC <-->|"decode audio"| BACKEND
-  SDL2["SDL2 Window + Speaker Output"]
+  SDL3["SDL3 Window + Speaker Output"]
   BACKEND["FFmpeg or Media Foundation"]
   HTTP -.->|"HTTP byte-range stream"| YOU
   DASH --- HTTP
@@ -531,9 +531,9 @@ graph TD
         <p class="desc">Media Foundation is the opt-in native backend on Windows. It decodes video and audio from local files and HTTP streams, then currently hands CPU frames and PCM audio to the same SDL presentation and audio layers.</p>
       </div>
       <div class="ve-card">
-        <span class="tag tag--teal" style="margin-bottom:10px;display:inline-block">SDL2</span>
+        <span class="tag tag--teal" style="margin-bottom:10px;display:inline-block">SDL3</span>
         <div class="title">The Display and Sound Output Layer</div>
-        <p class="desc">SDL2 (Simple DirectMedia Layer) handles everything you actually see and hear: it creates the window, uses the GPU to draw pixels to the screen as fast as possible, and talks to the Windows audio system to play sound. Without SDL2, you would need to write different code for every operating system just to open a window or play a sound.</p>
+        <p class="desc">SDL3 (Simple DirectMedia Layer) handles everything you actually see and hear: it creates the window, uses the GPU to draw pixels to the screen as fast as possible, and talks to the Windows audio system to play sound. Without SDL3, you would need to write different code for every operating system just to open a window or play a sound.</p>
       </div>
       <div class="ve-card">
         <span class="tag tag--sage" style="margin-bottom:10px;display:inline-block">FTXUI</span>

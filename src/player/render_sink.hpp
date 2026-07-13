@@ -3,7 +3,7 @@
 #include "player/audio_output.hpp"
 #include "player/av_support.hpp"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 extern "C" {
 #include <libavcodec/avcodec.h>

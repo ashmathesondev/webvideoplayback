@@ -131,8 +131,6 @@ struct SdlTextureRenderSink::Impl {
         const std::string window_title = "Web Video Playback [" + backend_name + "]";
         window.reset(SDL_CreateWindow(
             window_title.c_str(),
-            SDL_WINDOWPOS_CENTERED,
-            SDL_WINDOWPOS_CENTERED,
             config.width,
             config.height,
             SDL_WINDOW_RESIZABLE));
@@ -140,14 +138,16 @@ struct SdlTextureRenderSink::Impl {
             throw std::runtime_error(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
         }
 
-        renderer.reset(SDL_CreateRenderer(window.get(), -1, SDL_RENDERER_ACCELERATED));
+        SDL_SetWindowPosition(window.get(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+
+        renderer.reset(SDL_CreateRenderer(window.get(), nullptr));
         if (!renderer) {
             throw std::runtime_error(std::string("SDL_CreateRenderer failed: ") + SDL_GetError());
         }
 
         texture.reset(SDL_CreateTexture(
             renderer.get(),
-            config.pixel_format == AV_PIX_FMT_YUV420P ? SDL_PIXELFORMAT_IYUV : SDL_PIXELFORMAT_RGBA32,
+            texture_format(config.pixel_format),
             SDL_TEXTUREACCESS_STREAMING,
             config.width,
             config.height));
@@ -156,7 +156,9 @@ struct SdlTextureRenderSink::Impl {
         }
 
         direct_yuv = config.pixel_format == AV_PIX_FMT_YUV420P;
-        if (!direct_yuv) {
+        direct_yuy2 = config.pixel_format == AV_PIX_FMT_YUYV422;
+        direct_bgra = config.pixel_format == AV_PIX_FMT_BGRA;
+        if (!direct_yuv && !direct_yuy2 && !direct_bgra) {
             scaler.reset(sws_getContext(
                 config.width,
                 config.height,
@@ -175,9 +177,23 @@ struct SdlTextureRenderSink::Impl {
 
         width = config.width;
         height = config.height;
-        if (!direct_yuv) {
+        if (!direct_yuv && !direct_yuy2 && !direct_bgra) {
             pixels.resize(static_cast<std::size_t>(width * height * 4));
         }
+    }
+
+    static SDL_PixelFormat texture_format(AVPixelFormat pixel_format)
+    {
+        if (pixel_format == AV_PIX_FMT_YUV420P) {
+            return SDL_PIXELFORMAT_IYUV;
+        }
+        if (pixel_format == AV_PIX_FMT_YUYV422) {
+            return SDL_PIXELFORMAT_YUY2;
+        }
+        if (pixel_format == AV_PIX_FMT_BGRA) {
+            return SDL_PIXELFORMAT_BGRA32;
+        }
+        return SDL_PIXELFORMAT_RGBA32;
     }
 
     SDL_Rect video_destination_rect(int window_width, int window_height) const
@@ -260,7 +276,11 @@ struct SdlTextureRenderSink::Impl {
                         continue;
                     }
 
-                    SDL_Rect pixel = {cursor_x + column * scale, y + row * scale, scale, scale};
+                    SDL_FRect pixel = {
+                        static_cast<float>(cursor_x + column * scale),
+                        static_cast<float>(y + row * scale),
+                        static_cast<float>(scale),
+                        static_cast<float>(scale)};
                     SDL_RenderFillRect(renderer.get(), &pixel);
                 }
             }
@@ -309,13 +329,13 @@ struct SdlTextureRenderSink::Impl {
 
         constexpr int panel_height = 102;
         const int panel_y = stats.window_height > panel_height ? stats.window_height - panel_height : 0;
-        SDL_Rect panel = {0, panel_y, stats.window_width, panel_height};
+        SDL_FRect panel = {0.0F, static_cast<float>(panel_y), static_cast<float>(stats.window_width), static_cast<float>(panel_height)};
 
         SDL_SetRenderDrawBlendMode(renderer.get(), SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer.get(), 12, 18, 22, 210);
         SDL_RenderFillRect(renderer.get(), &panel);
         SDL_SetRenderDrawColor(renderer.get(), 72, 165, 180, 255);
-        SDL_RenderDrawLine(renderer.get(), 0, panel_y, stats.window_width, panel_y);
+        SDL_RenderLine(renderer.get(), 0.0F, static_cast<float>(panel_y), static_cast<float>(stats.window_width), static_cast<float>(panel_y));
 
         draw_text(12, panel_y + 10, first_line.str());
         draw_text(12, panel_y + 32, second_line.str());
@@ -331,6 +351,8 @@ struct SdlTextureRenderSink::Impl {
     int width = 0;
     int height = 0;
     bool direct_yuv = false;
+    bool direct_yuy2 = false;
+    bool direct_bgra = false;
     VideoFrameTiming last_timing;
     std::vector<std::uint8_t> pixels;
 };
@@ -354,7 +376,7 @@ VideoFrameTiming SdlTextureRenderSink::present(const RenderFrame& frame)
     const auto total_start = std::chrono::steady_clock::now();
 
     const auto convert_start = std::chrono::steady_clock::now();
-    if (!impl_->direct_yuv) {
+    if (!impl_->direct_yuv && !impl_->direct_yuy2 && !impl_->direct_bgra) {
         std::uint8_t* scaled_pixels[] = {impl_->pixels.data()};
         const int linesize[] = {impl_->width * 4};
         sws_scale(
@@ -379,11 +401,19 @@ VideoFrameTiming SdlTextureRenderSink::present(const RenderFrame& frame)
                 frame.cpu_frame.linesize[1],
                 frame.cpu_frame.data[2],
                 frame.cpu_frame.linesize[2])
-            != 0) {
+            == false) {
             throw std::runtime_error(std::string("SDL_UpdateYUVTexture failed: ") + SDL_GetError());
         }
+    } else if (impl_->direct_yuy2) {
+        if (!SDL_UpdateTexture(impl_->texture.get(), nullptr, frame.cpu_frame.data[0], frame.cpu_frame.linesize[0])) {
+            throw std::runtime_error(std::string("SDL_UpdateTexture failed: ") + SDL_GetError());
+        }
+    } else if (impl_->direct_bgra) {
+        if (!SDL_UpdateTexture(impl_->texture.get(), nullptr, frame.cpu_frame.data[0], frame.cpu_frame.linesize[0])) {
+            throw std::runtime_error(std::string("SDL_UpdateTexture failed: ") + SDL_GetError());
+        }
     } else {
-        if (SDL_UpdateTexture(impl_->texture.get(), nullptr, impl_->pixels.data(), impl_->width * 4) != 0) {
+        if (!SDL_UpdateTexture(impl_->texture.get(), nullptr, impl_->pixels.data(), impl_->width * 4)) {
             throw std::runtime_error(std::string("SDL_UpdateTexture failed: ") + SDL_GetError());
         }
     }
@@ -391,7 +421,7 @@ VideoFrameTiming SdlTextureRenderSink::present(const RenderFrame& frame)
 
     int window_width = 0;
     int window_height = 0;
-    SDL_GetRendererOutputSize(impl_->renderer.get(), &window_width, &window_height);
+    SDL_GetCurrentRenderOutputSize(impl_->renderer.get(), &window_width, &window_height);
     const SDL_Rect video_rect = impl_->video_destination_rect(window_width, window_height);
 
     SDL_SetRenderDrawColor(impl_->renderer.get(), 0, 0, 0, 255);
@@ -400,7 +430,12 @@ VideoFrameTiming SdlTextureRenderSink::present(const RenderFrame& frame)
     SDL_RenderClear(impl_->renderer.get());
     const auto clear_end = std::chrono::steady_clock::now();
     const auto copy_start = std::chrono::steady_clock::now();
-    SDL_RenderCopy(impl_->renderer.get(), impl_->texture.get(), nullptr, &video_rect);
+    const SDL_FRect video_rect_f = {
+        static_cast<float>(video_rect.x),
+        static_cast<float>(video_rect.y),
+        static_cast<float>(video_rect.w),
+        static_cast<float>(video_rect.h)};
+    SDL_RenderTexture(impl_->renderer.get(), impl_->texture.get(), nullptr, &video_rect_f);
     const auto copy_end = std::chrono::steady_clock::now();
     const auto overlay_start = std::chrono::steady_clock::now();
     if (frame.show_overlay) {
@@ -431,7 +466,7 @@ SDL_Rect SdlTextureRenderSink::current_video_rect() const
 {
     int width = 0;
     int height = 0;
-    SDL_GetRendererOutputSize(impl_->renderer.get(), &width, &height);
+    SDL_GetCurrentRenderOutputSize(impl_->renderer.get(), &width, &height);
     return impl_->video_destination_rect(width, height);
 }
 
@@ -439,7 +474,7 @@ int SdlTextureRenderSink::window_width() const
 {
     int width = 0;
     int height = 0;
-    SDL_GetRendererOutputSize(impl_->renderer.get(), &width, &height);
+    SDL_GetCurrentRenderOutputSize(impl_->renderer.get(), &width, &height);
     return width;
 }
 
@@ -447,7 +482,7 @@ int SdlTextureRenderSink::window_height() const
 {
     int width = 0;
     int height = 0;
-    SDL_GetRendererOutputSize(impl_->renderer.get(), &width, &height);
+    SDL_GetCurrentRenderOutputSize(impl_->renderer.get(), &width, &height);
     return height;
 }
 

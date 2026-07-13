@@ -8,7 +8,7 @@
 #include "player/playback_pause.hpp"
 #include "player/sdl_media.hpp"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include <chrono>
 #include <ctime>
@@ -182,29 +182,27 @@ EventState pump_events(bool& running)
     EventState state;
     SDL_Event event;
     while (SDL_PollEvent(&event) != 0) {
-        if (event.type == SDL_QUIT) {
+        if (event.type == SDL_EVENT_QUIT) {
             running = false;
         }
-        if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
             running = false;
         }
-        if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_F1) {
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F1) {
             state.overlay_toggle = true;
         }
-        if (event.type == SDL_WINDOWEVENT) {
-            switch (event.window.event) {
-            case SDL_WINDOWEVENT_MOVED:
-            case SDL_WINDOWEVENT_RESIZED:
-            case SDL_WINDOWEVENT_SIZE_CHANGED:
-            case SDL_WINDOWEVENT_MAXIMIZED:
-            case SDL_WINDOWEVENT_RESTORED:
+        switch (event.type) {
+        case SDL_EVENT_WINDOW_MOVED:
+        case SDL_EVENT_WINDOW_RESIZED:
+        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        case SDL_EVENT_WINDOW_MAXIMIZED:
+        case SDL_EVENT_WINDOW_RESTORED:
                 state.window_interaction = true;
-                break;
-            default:
-                break;
-            }
+            break;
+        default:
+            break;
         }
-        if (event.type == SDL_MOUSEBUTTONUP && event.button.button == SDL_BUTTON_LEFT) {
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT) {
             state.interaction_finished = true;
         }
     }
@@ -227,6 +225,11 @@ int run(const std::string& path, bool performance_report_enabled, DecoderBackend
         render_sink = std::make_unique<SdlTextureRenderSink>(media_info.video_render, backend.backend_name);
     }
     decoder.start();
+    if (media_info.has_video && decoder.has_audio()) {
+        if (AudioOutput* output = decoder.audio_output()) {
+            output->pause();
+        }
+    }
 
     bool running = true;
     bool show_overlay = false;
@@ -296,6 +299,9 @@ int run(const std::string& path, bool performance_report_enabled, DecoderBackend
             if (!playback_started && decoder.audio_preroll_ready()) {
                 // Start video only after audio has a usable clock and buffer.
                 playback_started = true;
+                if (AudioOutput* output = decoder.audio_output()) {
+                    output->resume();
+                }
                 playback_start = std::chrono::steady_clock::now();
                 last_loop_time = playback_start;
             }

@@ -526,19 +526,19 @@ video_output.<span class="fn">render_frame</span>(frame);</pre>
         <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
           <div class="f-step" style="color:var(--violet)">4</div>
           <div class="f-name">Decode</div>
-          <div class="f-note">FFmpeg decoders emit AVFrames. Media Foundation emits BGRA video samples and float PCM audio.</div>
+          <div class="f-note">FFmpeg decoders emit AVFrames. Media Foundation emits YUY2 or BGRA video samples and float PCM audio.</div>
         </div>
         <div class="flow-arrow">›</div>
         <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
           <div class="f-step" style="color:var(--violet)">5</div>
           <div class="f-name">Convert</div>
-          <div class="f-note">FFmpeg YUV420P uses SDL_UpdateYUVTexture. Other CPU formats convert to RGBA before upload.</div>
+          <div class="f-note">FFmpeg YUV420P uses SDL_UpdateYUVTexture. YUY2 and BGRA upload directly; other CPU formats convert to RGBA before upload.</div>
         </div>
         <div class="flow-arrow">›</div>
         <div class="flow-box" style="border-color:rgba(167,139,250,0.3)">
           <div class="f-step" style="color:var(--violet)">6</div>
           <div class="f-name">Render</div>
-          <div class="f-note">SDL_RenderCopy scales the GPU texture into the letterboxed destination rect on screen.</div>
+          <div class="f-note">SDL_RenderTexture scales the GPU texture into the letterboxed destination rect on screen.</div>
         </div>
       </div>
       <div class="grid grid--2">
@@ -602,8 +602,8 @@ video_output.<span class="fn">render_frame</span>(frame);</pre>
       <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">Defined in <span class="file-pill">src/player/audio_output.hpp</span>. AudioOutput pushes decoded float samples into SDL's internal audio queue and tracks the playback clock.</p>
       <ul class="list" style="font-size:12px">
         <li>Target audio buffer size: 150 ms (tunable via <code>WEBVIDEOPLAYBACK_AUDIO_LATENCY_MS</code> env var)</li>
-        <li>FFmpeg pipeline: AVFrame &rarr; libswresample &rarr; float32 stereo &rarr; SDL queue</li>
-        <li>Media Foundation pipeline: float PCM sample &rarr; SDL queue</li>
+        <li>FFmpeg pipeline: AVFrame &rarr; libswresample &rarr; float32 stereo &rarr; SDL stream</li>
+        <li>Media Foundation pipeline: float PCM sample &rarr; SDL stream</li>
         <li><code>playback_seconds()</code> returns a running estimate of how much audio has been consumed by the hardware</li>
         <li>This estimate is the master clock that video synchronizes against</li>
         <li>Higher latency = more stable audio (fewer underruns) but more sync lag</li>
@@ -615,7 +615,7 @@ video_output.<span class="fn">render_frame</span>(frame);</pre>
       <ul class="list" style="font-size:12px">
         <li>SDL_Renderer uses the GPU for texture scaling &mdash; no CPU-side pixel scaling</li>
         <li>YUV420P fast path: calls <code>SDL_UpdateYUVTexture</code> (three-plane Y/U/V upload)</li>
-        <li>Other pixel formats: libswscale converts to RGBA first, then <code>SDL_UpdateTexture</code></li>
+        <li>YUY2 and BGRA fast paths: upload directly with <code>SDL_UpdateTexture</code>; other pixel formats convert to RGBA first</li>
         <li>Letterbox bars cleared to black each frame before rendering the video rect</li>
         <li><code>F1</code> key toggles debug overlay drawn with a custom bitmap font glyph table</li>
       </ul>
@@ -695,7 +695,7 @@ video_output.<span class="fn">render_frame</span>(frame);</pre>
 sequenceDiagram
   participant User
   participant Main as Main Thread
-  participant SDL as SDL2
+  participant SDL as SDL3
   participant Backend as Decoder Backend
   participant FF as FFmpeg
   participant MF as Media Foundation
@@ -710,14 +710,14 @@ sequenceDiagram
   Main->>Backend: start()
 
   Main->>Backend: audio_preroll_ready()
-  Backend->>SDL: SDL_QueueAudio (PCM samples)
+  Backend->>SDL: SDL_PutAudioStreamData (PCM samples)
   SDL-->>Backend: audio playback clock
 
   Main->>Backend: pop_video_frame()
   Backend-->>Main: decoded video frame
   Main->>Main: wait for audio clock sync
   Main->>SDL: SDL_UpdateTexture or SDL_UpdateYUVTexture
-  Main->>SDL: SDL_RenderCopy (draw to window)
+  Main->>SDL: SDL_RenderTexture (draw to window)
   SDL-->>User: First frame visible
         </pre>
       </div>
@@ -740,7 +740,7 @@ sequenceDiagram
             <li><span class="file-pill">src/player/ffmpeg_media_decoder.cpp</span> — FFmpeg demux, decode, workers, and audio queueing</li>
             <li><span class="file-pill">src/player/media_foundation_decoder.cpp</span> — Windows Media Foundation Source Reader backend</li>
             <li><span class="file-pill">src/player/av_support.hpp</span> — FFmpeg RAII wrappers, open_input, open_decoder, frame_seconds, stream_fps</li>
-            <li><span class="file-pill">src/player/audio_output.hpp</span> — SDL audio queue and playback clock</li>
+            <li><span class="file-pill">src/player/audio_output.hpp</span> — SDL audio stream and playback clock</li>
             <li><span class="file-pill">src/player/render_sink.hpp</span> — SDL texture render sink and debug overlay</li>
             <li><span class="file-pill">src/player/sdl_platform.hpp</span> — SDL guard, file picker, memory stats</li>
           </ul>
@@ -754,7 +754,7 @@ sequenceDiagram
           </ul>
           <div class="tag tag--amber" style="margin-top:14px;margin-bottom:10px">Build</div>
           <ul class="list" style="font-size:12px">
-            <li><span class="file-pill">CMakeLists.txt</span> — two targets, C++20, vcpkg, links SDL2, FFmpeg, Media Foundation, FTXUI, and server libraries</li>
+            <li><span class="file-pill">CMakeLists.txt</span> — two targets, C++20, vcpkg, links SDL3, FFmpeg, Media Foundation, FTXUI, and server libraries</li>
             <li><span class="file-pill">vcpkg.json</span> — declares third-party dependencies for vcpkg to download</li>
           </ul>
         </div>

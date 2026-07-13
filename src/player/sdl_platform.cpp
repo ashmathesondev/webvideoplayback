@@ -2,7 +2,7 @@
 
 #include "common/string_utils.hpp"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -106,7 +106,7 @@ MemoryStats current_memory_stats()
 
 SdlGuard::SdlGuard()
 {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
         throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
     }
 }
